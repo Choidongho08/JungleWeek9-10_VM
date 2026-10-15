@@ -1,0 +1,65 @@
+name: "🛠 기능 구현"
+description: 구현할 기능/함수를 등록하고 담당자를 정합니다.
+title: "[기능] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        기능 하나(또는 함수 하나)당 이슈 하나를 만듭니다.
+        PR 본문에 `Closes #이슈번호` 를 적으면 dev 에 머지될 때 이 이슈가 자동으로 닫힙니다.
+  - type: dropdown
+    id: project
+    attributes:
+      label: 프로젝트
+      options:
+        - threads
+        - userprog
+        - vm
+        - filesys
+    validations:
+      required: true
+  - type: input
+    id: feature
+    attributes:
+      label: 기능 이름
+      description: 기능 브랜치 이름에 쓰는 이름
+      placeholder: "예: priority  →  feature-priority"
+    validations:
+      required: true
+  - type: textarea
+    id: functions
+    attributes:
+      label: 구현할 함수 / 수정할 파일
+      placeholder: |
+        - threads/thread.c: thread_set_priority()
+        - threads/synch.c: sema_up()
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: 통과시킬 테스트
+      description: Pintos 공식 테스트 이름
+      placeholder: |
+        - priority-change
+        - priority-preempt
+  - type: input
+    id: branch
+    attributes:
+      label: 작업 브랜치
+      placeholder: "예: feature-priority-kim"
+  - type: textarea
+    id: done
+    attributes:
+      label: 완료 조건
+      value: |
+        - [ ] 함수 구현
+        - [ ] 로컬 `make check` 로 위 테스트 PASS 확인
+        - [ ] 기존에 PASS 하던 테스트가 FAIL 로 바뀌지 않음
+        - [ ] 기능 브랜치(feature-기능)에 머지
+  - type: textarea
+    id: notes
+    attributes:
+      label: 참고 / 설계 메모
+      placeholder: 구현 아이디어, 다른 팀원 작업과 겹치는 부분 등
