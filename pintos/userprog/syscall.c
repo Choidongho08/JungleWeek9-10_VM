@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include "filesys/filesys.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
@@ -35,6 +36,17 @@ syscall_init (void) {
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+}
+
+/* 호출자가 파일 생성의 성공 여부를 확인하도록 결과를 전달한다. */
+static bool
+sys_create (const char *file_name, unsigned initial_size) {
+	/* TODO: 공통 사용자 문자열 검증을 연결한다. */
+	/* TODO: 공통 파일 시스템 락을 획득한다. */
+	bool success = filesys_create (file_name, initial_size);
+
+	/* TODO: 공통 파일 시스템 락을 해제한다. */
+	return success;
 }
 
 /* The main system call interface */
