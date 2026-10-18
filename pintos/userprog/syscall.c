@@ -49,6 +49,17 @@ sys_create (const char *file_name, unsigned initial_size) {
 	return success;
 }
 
+/* 호출자가 파일 삭제의 성공 여부를 확인하도록 결과를 전달한다. */
+static bool
+sys_remove (const char *file_name) {
+	/* TODO: 공통 사용자 문자열 검증을 연결한다. */
+	/* TODO: 공통 파일 시스템 락을 획득한다. */
+	bool success = filesys_remove (file_name);
+
+	/* TODO: 공통 파일 시스템 락을 해제한다. */
+	return success;
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
