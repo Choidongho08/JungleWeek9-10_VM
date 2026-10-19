@@ -455,7 +455,23 @@ load (const char *file_name, struct intr_frame *if_) {
 		arg_addrs [argc] = (char *) if_->rsp;
 		argc++;
 	}
-	 
+	
+	/* 명령행 인자 목록의 끝을 나타내는 null 포인터 추가. */
+	if (!(argc < sizeof (arg_addrs) / sizeof (arg_addrs [0]))) 
+		goto done;
+	arg_addrs [argc] = NULL;
+
+	/* arg_addrs를 유저스택에 넣는 반복문 실행. */
+	for (i = argc; i >= 0; i--){
+		if (!is_stack_space_available (if_->rsp, sizeof (arg_addrs [0])))
+			goto done;
+		if_->rsp -= sizeof (arg_addrs [i]);
+		*(char **) if_->rsp = arg_addrs [i];
+	}
+	
+	/* 레지스터 설정. */
+	if_->R.rsi = if_->rsp;
+	
 	success = true;
 
 done:
