@@ -22,9 +22,6 @@
 #include "vm/vm.h"
 #endif
 
-
-
-
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
@@ -319,6 +316,19 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes,
 		bool writable);
 
+/* 스택 공간 검증 함수 */
+static bool
+is_stack_space_available (uintptr_t cur_rsp, uint64_t required_size) {
+	uint64_t rest_stack;
+	/* 	
+		현재 cur_rsp가 스택 하한 이상인지 확인
+	*/
+	if (cur_rsp < (USER_STACK - PGSIZE))
+		return false;
+	rest_stack = cur_rsp - (USER_STACK - PGSIZE);
+	return rest_stack >= required_size;
+}
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
@@ -332,6 +342,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
+	int argc = 0; 				 /* 유저프로그램에 전달할 명령행 인자의 개수 */
+	char *arg_addrs [64];		 /* 유저 스택 안의 적재된 문자열의 포인터를 담는 임시버퍼 (포인터 64개)*/
 	char *token, *save_ptr; 	 /* 문자열 파싱에 필요한 변수 */
 	char parse_buffer [128];	 /*	명령행 파싱을 위한 문자열 복사 버퍼, 커널의 명령행 최대길이 128 바이트 */
 
@@ -431,6 +443,19 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
 
+	size_t token_size;
+
+	/* 문자열 파싱 이어서 진행. */
+	for (; token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
+		token_size = strlen (token) + 1;
+		if (!(is_stack_space_available (if_->rsp, token_size) && argc < sizeof (arg_addrs) / sizeof (arg_addrs[0])))
+			goto done;
+		if_->rsp -= token_size;
+		strlcpy ((char *) if_->rsp, token, token_size);
+		arg_addrs [argc] = (char *) if_->rsp;
+		argc++;
+	}
+	 
 	success = true;
 
 done:
