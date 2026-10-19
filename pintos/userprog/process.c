@@ -329,6 +329,9 @@ is_stack_space_available (uintptr_t cur_rsp, uint64_t required_size) {
 	return rest_stack >= required_size;
 }
 
+/* 스택 포인터 정렬 단위 */
+#define STACK_ALIGNMENT 16
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
@@ -455,6 +458,16 @@ load (const char *file_name, struct intr_frame *if_) {
 		arg_addrs [argc] = (char *) if_->rsp;
 		argc++;
 	}
+
+	/* 최종 rsp % 16 == 8 (함수 진입 직후 상태) 가 되도록 패딩을 구한다.
+	   가짜 반환 주소 8B 와 진입 오프셋 8B 는 상쇄되므로 argv 포인터 argc + 1 개만 센다. */
+	uintptr_t padding = (if_->rsp - (sizeof (void *) * (argc + 1))) % STACK_ALIGNMENT;
+
+	/* 스택 페이지는 setup_stack 에서 palloc_get_page (PAL_USER | PAL_ZERO) 로 받아
+	   이미 0 으로 채워져 있으므로, 패딩 자리를 따로 채우지 않는다. */
+	if (!is_stack_space_available (if_->rsp, padding))
+		goto done;
+	if_->rsp -= padding;
 	
 	/* 명령행 인자 목록의 끝을 나타내는 null 포인터 추가. */
 	if (!(argc < sizeof (arg_addrs) / sizeof (arg_addrs [0]))) 
