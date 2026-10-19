@@ -1,3 +1,4 @@
+#include "filesys/file.h"
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
@@ -66,4 +67,16 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	// TODO: Your implementation goes here.
 	printf ("system call!\n");
 	thread_exit ();
+}
+
+int
+sys_filesize (int fd){
+	struct file *file = sys_filesize(fd); //fd 자리에 open()이 반환한 파일 번호 필요
+
+	if(file != NULL){
+		return file_length(file);
+	}
+	else{
+		return -1;
+	}
 }
