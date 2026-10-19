@@ -469,8 +469,13 @@ load (const char *file_name, struct intr_frame *if_) {
 		*(char **) if_->rsp = arg_addrs [i];
 	}
 	
+	/* 가짜 반환 주소 넣고, 해당 주소에 8바이트의 '0'을 저장한다. */
+	if_->rsp -= sizeof (void *);
+	*(uint64_t *) if_->rsp = 0;
+
 	/* 레지스터 설정. */
 	if_->R.rsi = if_->rsp;
+	if_->R.rdi = argc;
 	
 	success = true;
 
