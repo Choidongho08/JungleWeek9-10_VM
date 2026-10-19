@@ -17,6 +17,7 @@
 #include "threads/thread.h"
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
 #include "intrinsic.h"
 #ifdef VM
 #include "vm/vm.h"
@@ -50,23 +51,65 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	struct child_state* state = malloc(sizeof (struct child_state));
+	if(state == NULL)
+	{
+		palloc_free_page(fn_copy);
+		return TID_ERROR;
+	}
+	state->exit_val = -1;
+	state->refer_cnt = 2;
+	lock_init(&state->refer_cnt_protect_lock);
+	sema_init(&state->wait_sema, 0);
+	state->waited = false;
+	
+	struct user_prog_initd_aux* aux = malloc(sizeof(struct user_prog_initd_aux));
+	if(aux == NULL)
+	{
+		free(state);
+		palloc_free_page(fn_copy);
+		return TID_ERROR;
+	}
+	aux->fn_copy = fn_copy;
+	aux->state = state;
+	
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (file_name, PRI_DEFAULT, initd, aux);
 	if (tid == TID_ERROR)
-		palloc_free_page (fn_copy);
+	{
+		free(state);
+		free(aux);
+		palloc_free_page(fn_copy);
+		return TID_ERROR;
+	}
+
+	state->tid = tid;
+	
+	struct thread* curr = thread_current();
+	list_init(&curr->child_state_list);
+	
+	list_push_back(&curr->child_state_list, &state->elem);
 	return tid;
 }
 
 /* A thread function that launches first user process. */
 static void
-initd (void *f_name) {
+initd (void *initd_aux) {
 #ifdef VM
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
 
 	process_init ();
+	
+	struct user_prog_initd_aux* aux = (struct user_prog_initd_aux*)initd_aux;
 
-	if (process_exec (f_name) < 0)
+	struct thread* curr = thread_current();
+	curr->share_parent = aux->state;
+
+	char* fn_copy = aux->fn_copy;
+	free(aux);
+	
+	if (process_exec (fn_copy) < 0)
 		PANIC("Fail to launch initd\n");
 	NOT_REACHED ();
 }
@@ -76,7 +119,8 @@ initd (void *f_name) {
 tid_t
 process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
-	return thread_create (name, PRI_DEFAULT, __do_fork, thread_current ());
+	return thread_create (name,
+			PRI_DEFAULT, __do_fork, thread_current ());
 }
 
 #ifndef VM
@@ -203,6 +247,38 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	struct thread* curr = thread_current();
+	if(child_tid == -1 || list_empty(&curr->child_state_list))
+		return -1;
+
+	for(struct list_elem* child = list_begin(&curr->child_state_list); child != list_end(&curr->child_state_list); child = list_next(child))
+	{
+		struct child_state* state = list_entry(child, struct child_state, elem);
+		if(state->tid != child_tid)
+			continue;
+		if(state->waited)
+			return -1;
+
+		state->waited = true;
+		sema_down(&state->wait_sema);
+
+		// remove를 먼저하는 이유: child_elem이 state에 있기 때문에 state를 해제하기 전 리스트에서 빼주기!
+		// sema_down 후 remove해도 되는 이유: 자식이 state를 삭제한 상태일 수 없기 때문에
+		list_remove(child);
+
+		lock_acquire(&state->refer_cnt_protect_lock);
+		int temp_exit_val = state->exit_val;
+		state->refer_cnt--;
+		if(state->refer_cnt == 0)
+		{
+			lock_release(&state->refer_cnt_protect_lock);
+			free(state);
+		}
+		else
+			lock_release(&state->refer_cnt_protect_lock);
+
+		return temp_exit_val;
+	}
 	return -1;
 }
 
@@ -215,7 +291,55 @@ process_exit (void) {
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 
+	bool is_user_prog = curr->share_parent != NULL ? true : false;
+
+	if(is_user_prog)
+	{
+		printf ("%s: exit(%d)\n", curr->name, curr->share_parent->exit_val);
+	}
+	
+	// 자원 정리
+	if(is_user_prog)
+	{
+		// 나도 누군가(들)의 부모일 수 있다. 부모가 해제되기 때문에 자식들의 참조를 줄여야한다.
+		size_t size = list_size(&curr->child_state_list);
+		for(int i = 0; i < size; ++i)
+		{
+			struct list_elem* child = list_front(&curr->child_state_list);
+			struct child_state* state = list_entry(child, struct child_state, elem);
+
+			list_remove(child);
+
+			lock_acquire(&state->refer_cnt_protect_lock);
+			state->refer_cnt--;
+			if(state->refer_cnt == 0)
+			{
+				lock_release(&state->refer_cnt_protect_lock);
+				free(state);
+			}
+			else
+				lock_release(&state->refer_cnt_protect_lock);
+		}
+	}
 	process_cleanup ();
+
+	if(is_user_prog)
+	{
+		// 부모 호출(like 스몰더)
+		sema_up(&curr->share_parent->wait_sema); // 마지막에 up하는 이유: 맨 위에 했을 땐 부모가 먼저 깨어나서 wait에서 반환할 수 있기 때문이다.(제대로 정리되지 않고 반환)
+		// 부모가 먼저 깨어나도 아직 자식 참조는 있기에 share_parent가 해제되지 않음.
+
+		lock_acquire(&curr->share_parent->refer_cnt_protect_lock);
+		curr->share_parent->refer_cnt--;
+		if(curr->share_parent->refer_cnt == 0)
+		{
+			lock_release(&curr->share_parent->refer_cnt_protect_lock);
+			free(curr->share_parent);
+			// 락 해제하고 free해도 되는 이유: 참조자가 없기 때문에 값이 변경될 일도 없다!
+		}
+		else
+			lock_release(&curr->share_parent->refer_cnt_protect_lock);
+	}
 }
 
 /* Free the current process's resources. */

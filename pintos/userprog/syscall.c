@@ -7,6 +7,12 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "userprog/process.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/malloc.h"
+#include "threads/vaddr.h"
+#include "threads/mmu.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -24,6 +30,8 @@ void syscall_handler (struct intr_frame *);
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
+struct lock file_lock; // loader 및 다른 파일 시스템과 통합 필요.
+
 void
 syscall_init (void) {
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
@@ -33,14 +41,84 @@ syscall_init (void) {
 	/* The interrupt service rountine should not serve any interrupts
 	 * until the syscall_entry swaps the userland stack to the kernel
 	 * mode stack. Therefore, we masked the FLAG_FL. */
-	write_msr(MSR_SYSCALL_MASK,
-			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+	write_msr(MSR_SYSCALL_MASK, FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+	lock_init(&file_lock);
 }
 
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
+	switch ((SYS_CALL_NAME)f->R.rax)
+	{
+		case SYS_EXIT:
+		{
+			thread_current()->share_parent->exit_val = f->R.rdi;
+			thread_exit();
+		}
+		return;
+		case SYS_WAIT:
+		{
+			f->R.rax = process_wait(f->R.rdi);
+		}
+		return;
+		case SYS_OPEN:
+		{
+			// 여기서 f->R.rdi (파일 이름)에 접근 가능한지 체크.
+			char* file_name = (char*)f->R.rdi;
+			if(file_name != NULL && file_name < KERN_BASE)
+			{
+				for(char* i = file_name; ; ++i)
+				{
+					if(i >= KERN_BASE || !pml4_get_page(thread_current()->pml4, i))
+					{
+						thread_current()->share_parent->exit_val = -1;
+						thread_exit();
+						return;
+					}
+					if(*i == '\0')
+						break;
+				}
+			}
+			else
+			{
+				thread_current()->share_parent->exit_val = -1;
+				thread_exit();
+				return;
+			}
+
+			lock_acquire(&file_lock);
+			struct file* file = filesys_open(file_name);
+			if(!file)
+			{
+				lock_release(&file_lock);
+				f->R.rax = -1;
+				return;
+			}
+			lock_release(&file_lock);
+			struct fd_status* status = malloc(sizeof (struct fd_status));
+			if(!status)
+			{
+				lock_acquire(&file_lock);
+				file_close(file);
+				lock_release(&file_lock);
+				f->R.rax = -1;
+				return;
+			}
+
+			status->fd = thread_current()->last_fd++;
+			status->file = file;
+			list_push_back(&thread_current()->file_list, &status->elem);
+
+			f->R.rax = status->fd;
+		}
+		return;
+		case SYS_CLOSE:
+		{
+
+		}
+		return;
+	}
 	printf ("system call!\n");
 	thread_exit ();
 }
