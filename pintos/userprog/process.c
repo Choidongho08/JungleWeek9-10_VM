@@ -22,6 +22,9 @@
 #include "vm/vm.h"
 #endif
 
+
+
+
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
@@ -329,14 +332,25 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
+	char *token, *save_ptr; 	 /* 문자열 파싱에 필요한 변수 */
+	char parse_buffer [128];	 /*	명령행 파싱을 위한 문자열 복사 버퍼, 커널의 명령행 최대길이 128 바이트 */
+
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate (thread_current ());
 
+	/* file_name 유효 검증 */
+	if (file_name == NULL)
+		goto done;
+
+	/* parse_buffer에 복사해서 첫 토큰 자르기. */
+	strlcpy (parse_buffer, file_name, sizeof (parse_buffer));
+	token = strtok_r (parse_buffer, " ", &save_ptr);
+	
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (token);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
