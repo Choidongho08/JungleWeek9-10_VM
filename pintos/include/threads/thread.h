@@ -135,6 +135,7 @@ struct thread {
 	uint64_t *pml4;                     /* Page map level 4 */
 	
 	struct list file_list;
+	int last_fd;
 	
 	struct child_state* share_parent;
 	struct list child_state_list;

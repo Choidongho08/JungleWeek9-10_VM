@@ -523,9 +523,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->donate_box.wait_lock = NULL; 		/* wait_lock 초기화 */
 	list_init(&t->donate_box.donated_list); /* donated_list 초기화 */
 	t->magic = THREAD_MAGIC;
-
-#ifdef USERPROG
+	
+	#ifdef USERPROG
 	list_init(&t->child_state_list);
+	t->last_fd = 2;
+	list_init(&t->file_list);
 #endif
 }
 

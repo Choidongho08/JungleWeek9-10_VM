@@ -9,6 +9,10 @@
 #include "intrinsic.h"
 #include "userprog/process.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/malloc.h"
+#include "threads/vaddr.h"
+#include "threads/mmu.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -25,6 +29,8 @@ void syscall_handler (struct intr_frame *);
 #define MSR_LSTAR 0xc0000082        /* 롱 모드의 SYSCALL 진입 주소. */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags에 적용할 마스크. */
 
+struct lock file_lock; // loader 및 다른 파일 시스템과 통합 필요.
+
 void
 syscall_init (void) {
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
@@ -35,33 +41,83 @@ syscall_init (void) {
 	 * 인터럽트 서비스 루틴이 인터럽트를 처리하면 안 된다.
 	 * 따라서 FLAG_FL을 마스킹한다. */
 	write_msr(MSR_SYSCALL_MASK, FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+	lock_init(&file_lock);
 }
 
 /* 시스템 콜의 주 진입 인터페이스. */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: 여기에 구현한다.
-	if(f->R.rax == SYS_EXIT)
-	{	
-		thread_current()->share_parent->exit_val = f->R.rdi;
-		thread_exit();
-		return;
-	}
-	if(f->R.rax == SYS_WAIT)
+	switch ((SYS_CALL_NAME)f->R.rax)
 	{
-		f->R.rax = process_wait(f->R.rdi);
+		case SYS_EXIT:
+		{
+			thread_current()->share_parent->exit_val = f->R.rdi;
+			thread_exit();
+		}
+		return;
+		case SYS_WAIT:
+		{
+			f->R.rax = process_wait(f->R.rdi);
+		}
+		return;
+		case SYS_OPEN:
+		{
+			// 여기서 f->R.rdi (파일 이름)에 접근 가능한지 체크.
+			char* file_name = (char*)f->R.rdi;
+			if(file_name != NULL && file_name < KERN_BASE)
+			{
+				for(char* i = file_name; ; ++i)
+				{
+					if(i >= KERN_BASE || !pml4_get_page(thread_current()->pml4, i))
+					{
+						thread_current()->share_parent->exit_val = -1;
+						thread_exit();
+						return;
+					}
+					if(*i == '\0')
+						break;
+				}
+			}
+			else
+			{
+				thread_current()->share_parent->exit_val = -1;
+				thread_exit();
+				return;
+			}
+
+			lock_acquire(&file_lock);
+			struct file* file = filesys_open(file_name);
+			if(!file)
+			{
+				lock_release(&file_lock);
+				f->R.rax = -1;
+				return;
+			}
+			lock_release(&file_lock);
+			struct fd_status* status = malloc(sizeof (struct fd_status));
+			if(!status)
+			{
+				lock_acquire(&file_lock);
+				file_close(file);
+				lock_release(&file_lock);
+				f->R.rax = -1;
+				return;
+			}
+
+			status->fd = thread_current()->last_fd++;
+			status->file = file;
+			list_push_back(&thread_current()->file_list, &status->elem);
+
+			f->R.rax = status->fd;
+		}
+		return;
+		case SYS_CLOSE:
+		{
+
+		}
 		return;
 	}
-	//if(f->R.rax == SYS_OPEN)
-	//{
-	//	struct file* file = filesys_open(f->R.rdi);
-	//	struct fd_status status;
-	//	status.fd = 
-	//}
-	//if(f->R.rax == SYS_CLOSE)
-	//{
-//
-	//}
 	printf ("system call!\n");
 	thread_exit ();
 }
