@@ -455,6 +455,22 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes,
 		bool writable);
 
+/* 스택 공간 검증 함수 */
+static bool
+is_stack_space_available (uintptr_t cur_rsp, uint64_t required_size) {
+	uint64_t rest_stack;
+	/* 	
+		현재 cur_rsp가 스택 하한 이상인지 확인
+	*/
+	if (cur_rsp < (USER_STACK - PGSIZE))
+		return false;
+	rest_stack = cur_rsp - (USER_STACK - PGSIZE);
+	return rest_stack >= required_size;
+}
+
+/* 스택 포인터 정렬 단위 */
+#define STACK_ALIGNMENT 16
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
@@ -468,20 +484,35 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
+	int argc = 0; 				 /* 유저프로그램에 전달할 명령행 인자의 개수 */
+	char *arg_addrs [64];		 /* 유저 스택 안의 적재된 문자열의 포인터를 담는 임시버퍼 (포인터 64개)*/
+	char *token, *save_ptr; 	 /* 문자열 파싱에 필요한 변수 */
+	char parse_buffer [128];	 /*	명령행 파싱을 위한 문자열 복사 버퍼, 커널의 명령행 최대길이 128 바이트 */
+
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate (thread_current ());
 
+	/* file_name 유효 검증 */
+	if (file_name == NULL)
+		goto done;
+
+	/* parse_buffer에 복사해서 첫 토큰 자르기. */
+	strlcpy (parse_buffer, file_name, sizeof (parse_buffer));
+	token = strtok_r (parse_buffer, " ", &save_ptr);
+	
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	// lock
+	file = filesys_open (token);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
 
 	/* Read and verify executable header. */
+	// lock
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
 			|| memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7)
 			|| ehdr.e_type != 2
@@ -498,10 +529,12 @@ load (const char *file_name, struct intr_frame *if_) {
 	for (i = 0; i < ehdr.e_phnum; i++) {
 		struct Phdr phdr;
 
+		// lock 
 		if (file_ofs < 0 || file_ofs > file_length (file))
 			goto done;
 		file_seek (file, file_ofs);
 
+		// lock
 		if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
 			goto done;
 		file_ofs += sizeof phdr;
@@ -556,6 +589,54 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
 
+	size_t token_size;
+
+	/* 문자열 파싱 이어서 진행. */
+	for (; token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
+		token_size = strlen (token) + 1;
+		if (!(is_stack_space_available (if_->rsp, token_size) && argc < sizeof (arg_addrs) / sizeof (arg_addrs[0])))
+			goto done;
+		if_->rsp -= token_size;
+		strlcpy ((char *) if_->rsp, token, token_size);
+		arg_addrs [argc] = (char *) if_->rsp;
+		argc++;
+	}
+
+	/* 최종 rsp % 16 == 8 (함수 진입 직후 상태) 가 되도록 패딩을 구한다.
+	   가짜 반환 주소 8B 와 진입 오프셋 8B 는 상쇄되므로 argv 포인터 argc + 1 개만 센다. */
+	uintptr_t padding = (if_->rsp - (sizeof (void *) * (argc + 1))) % STACK_ALIGNMENT;
+
+	/* 스택 페이지는 setup_stack 에서 palloc_get_page (PAL_USER | PAL_ZERO) 로 받아
+	   이미 0 으로 채워져 있으므로, 패딩 자리를 따로 채우지 않는다. */
+	if (!is_stack_space_available (if_->rsp, padding))
+		goto done;
+	if_->rsp -= padding;
+	
+	/* 명령행 인자 목록의 끝을 나타내는 null 포인터 추가. */
+	if (!(argc < sizeof (arg_addrs) / sizeof (arg_addrs [0]))) 
+		goto done;
+	arg_addrs [argc] = NULL;
+
+	/* arg_addrs를 유저스택에 넣는 반복문 실행. */
+	for (i = argc; i >= 0; i--){
+		if (!is_stack_space_available (if_->rsp, sizeof (arg_addrs [0])))
+			goto done;
+		if_->rsp -= sizeof (arg_addrs [i]);
+		*(char **) if_->rsp = arg_addrs [i];
+
+		/* rsi가 argv 배열의 시작 주소(&argv[0])를 가리킴 */
+		if (i == 0) {
+			if_->R.rsi = if_->rsp;
+		}
+	}
+	
+	/* 가짜 반환 주소 넣고, 해당 주소에 8바이트의 '0'을 저장한다. */
+	if_->rsp -= sizeof (void *);
+	*(uint64_t *) if_->rsp = 0;
+
+	/* 레지스터 설정. */
+	if_->R.rdi = argc;
+	
 	success = true;
 
 done:
