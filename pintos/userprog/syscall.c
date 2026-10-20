@@ -7,6 +7,9 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "threads/synch.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -43,4 +46,36 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	// TODO: Your implementation goes here.
 	printf ("system call!\n");
 	thread_exit ();
+}
+
+bool
+sys_create (const char *file_name, unsigned initial_size) { // 파일생성
+	lock_acquire();//FD
+	bool success = filesys_create (file_name, initial_size);
+
+	lock_release();//FD
+	return success;
+}
+
+bool
+sys_remove (const char *file_name) { //
+	lock_acquire();//FD
+	bool success = filesys_remove (file_name);
+
+	lock_release();//FD
+	return success;
+}
+
+int
+sys_filesize (int fd){
+	struct file *file = sys_filesize(fd); //fd 자리에 open()이 반환한 파일 번호 필요
+
+	if(file != NULL){
+	lock_acquire();//FD
+		return file_length(file);
+	lock_release();//FD
+	}
+	else{
+		return -1;
+	}
 }
