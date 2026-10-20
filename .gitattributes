@@ -1,0 +1,4 @@
+# Keep the Pintos TUI runnable in the Linux container after Windows checkouts.
+/pintos-tui text eol=lf
+/scripts/pintos_tui.py text eol=lf
+/scripts/README-pintos-tui.md text eol=lf

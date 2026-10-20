@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo_root="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+case "${TERM:-}" in
+  ""|dumb) export TERM=xterm-256color ;;
+esac
+export PYTHONIOENCODING=utf-8
+exec python3 "$repo_root/scripts/pintos_tui.py" "$@"
