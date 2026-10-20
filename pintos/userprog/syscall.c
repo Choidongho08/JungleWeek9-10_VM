@@ -1,14 +1,15 @@
-#include "filesys/file.h"
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
-#include "filesys/filesys.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "threads/synch.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -39,28 +40,6 @@ syscall_init (void) {
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
-/* 호출자가 파일 생성의 성공 여부를 확인하도록 결과를 전달한다. */
-static bool
-sys_create (const char *file_name, unsigned initial_size) {
-	/* TODO: 공통 사용자 문자열 검증을 연결한다. */
-	/* TODO: 공통 파일 시스템 락을 획득한다. */
-	bool success = filesys_create (file_name, initial_size);
-
-	/* TODO: 공통 파일 시스템 락을 해제한다. */
-	return success;
-}
-
-/* 호출자가 파일 삭제의 성공 여부를 확인하도록 결과를 전달한다. */
-static bool
-sys_remove (const char *file_name) {
-	/* TODO: 공통 사용자 문자열 검증을 연결한다. */
-	/* TODO: 공통 파일 시스템 락을 획득한다. */
-	bool success = filesys_remove (file_name);
-
-	/* TODO: 공통 파일 시스템 락을 해제한다. */
-	return success;
-}
-
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
@@ -69,12 +48,32 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	thread_exit ();
 }
 
+bool
+sys_create (const char *file_name, unsigned initial_size) { // 파일생성
+	lock_acquire();//FD
+	bool success = filesys_create (file_name, initial_size);
+
+	lock_release();//FD
+	return success;
+}
+
+bool
+sys_remove (const char *file_name) { //
+	lock_acquire();//FD
+	bool success = filesys_remove (file_name);
+
+	lock_release();//FD
+	return success;
+}
+
 int
 sys_filesize (int fd){
 	struct file *file = sys_filesize(fd); //fd 자리에 open()이 반환한 파일 번호 필요
 
 	if(file != NULL){
+	lock_acquire();//FD
 		return file_length(file);
+	lock_release();//FD
 	}
 	else{
 		return -1;
