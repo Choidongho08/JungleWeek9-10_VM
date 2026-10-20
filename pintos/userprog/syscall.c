@@ -17,6 +17,9 @@
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+static bool sys_create (const char *file_name, unsigned initial_size);
+static bool sys_remove (const char *file_name);
+static int sys_filesize (int fd);
 
 /* System call.
  *
@@ -143,9 +146,25 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			sys_wait(&f->R.rax, f->R.rdi);
 		}
 		return;
+		case SYS_CREATE:
+		{
+			f->R.rax = sys_create ((const char *) f->R.rdi,
+					(unsigned) f->R.rsi);
+		}
+		return;
+		case SYS_REMOVE:
+		{
+			f->R.rax = sys_remove ((const char *) f->R.rdi);
+		}
+		return;
 		case SYS_OPEN:
 		{
 			sys_open(&f->R.rax, f->R.rdi);
+		}
+		return;
+		case SYS_FILESIZE:
+		{
+			f->R.rax = sys_filesize ((int) f->R.rdi);
 		}
 		return;
 		case SYS_CLOSE:
@@ -157,34 +176,66 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	thread_exit ();
 }
 
-bool
+static bool
+check_file_name (const char *file_name) {
+	if (file_name == NULL)
+		return false;
+
+	for (const char *p = file_name; ; p++) {
+		if (!is_user_vaddr (p)
+				|| pml4_get_page (thread_current ()->pml4, p) == NULL)
+			return false;
+		if (*p == '\0')
+			return true;
+	}
+}
+
+static bool
 sys_create (const char *file_name, unsigned initial_size) { // 파일생성
-	lock_acquire();//FD
+	if (!check_file_name (file_name)) {
+		sys_exit (-1);
+		return false;
+	}
+
+	lock_acquire(&file_lock);//FD
 	bool success = filesys_create (file_name, initial_size);
 
-	lock_release();//FD
+	lock_release(&file_lock);//FD
 	return success;
 }
 
-bool
-sys_remove (const char *file_name) { //
-	lock_acquire();//FD
+static bool
+sys_remove (const char *file_name) {
+	if (!check_file_name (file_name)) {
+		sys_exit (-1);
+		return false;
+	}
+
+	lock_acquire(&file_lock);//FD
 	bool success = filesys_remove (file_name);
 
-	lock_release();//FD
+	lock_release(&file_lock);//FD
 	return success;
 }
 
-int
-sys_filesize (int fd){
-	struct file *file = sys_filesize(fd); //fd 자리에 open()이 반환한 파일 번호 필요
+static int
+sys_filesize (int fd) {
+	struct file *file = NULL;
+	struct list *files = &thread_current ()->file_list;
 
-	if(file != NULL){
-	lock_acquire();//FD
-		return file_length(file);
-	lock_release();//FD
+	for (struct list_elem *elem = list_begin (files);
+			elem != list_end (files); elem = list_next (elem)) {
+		struct fd_status *status = list_entry (elem, struct fd_status, elem);
+		if (status->fd == fd) {
+			file = status->file;
+			break;
+		}
 	}
-	else{
+	if (file == NULL)
 		return -1;
-	}
+
+	lock_acquire (&file_lock);
+	int size = file_length (file);
+	lock_release (&file_lock);
+	return size;
 }
