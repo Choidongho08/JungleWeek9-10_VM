@@ -7,9 +7,12 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "threads/init.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+static void sys_halt (void);
+
 
 /* System call.
  *
@@ -41,6 +44,22 @@ syscall_init (void) {
 void
 syscall_handler (struct intr_frame *f UNUSED) {
 	// TODO: Your implementation goes here.
-	printf ("system call!\n");
+	
+	switch (f->R.rax)
+	{
+		case SYS_HALT :
+			sys_halt();
+			break;
+
+		default:		
+			break;
+	}
+
 	thread_exit ();
 }
+
+void
+sys_halt (void) {
+	power_off ();
+}
+
