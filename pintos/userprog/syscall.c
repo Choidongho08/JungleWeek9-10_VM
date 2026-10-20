@@ -226,7 +226,10 @@ sys_write (int fd, const void *buffer, unsigned size) {
 
 	/* 1. fd 검사 */
 	if (fd != 1)	   /* 1 일 때 콘솔 출력, 1 아닐때 미구현 */
+	{
+		sys_exit(-1);
 		return -1;	   /* merge 후 잘못된 유저 포인터는 sys_exit (-1) 로 처리 */
+	}
 
 	/* 2. 버퍼 영역 검사 */
 	if (size == 0)
@@ -235,13 +238,19 @@ sys_write (int fd, const void *buffer, unsigned size) {
 	/* == 버퍼 기본 유효성 검사 === */
 	/* NULL 검사 */
 	if (buffer == NULL) 
+	{
+		sys_exit(-1);
 		return -1;
+	}
 
 	start_addr = (uintptr_t) buffer; 		/* 시작 주소 */
 	
 	/* 주소 오버플로 검사 */
 	if (size - 1 > UINTPTR_MAX - start_addr)
+	{
+		sys_exit(-1);
 		return -1;
+	}
 		
 	end_addr = start_addr + size - 1;	 	/* 마지막 바이트 주소*/
 
@@ -252,13 +261,19 @@ sys_write (int fd, const void *buffer, unsigned size) {
 	
 	/* 유저 주소 범위 검사 */
 	if (!is_user_vaddr (buffer) || !is_user_vaddr ((void*) end_addr))
+	{
+		sys_exit(-1);
 		return -1;
+	}
 
 	/* 페이지 매핑 검사 */
 	while (page_addr <= last_page) {
 		/* 실제 페이지 매핑 여부 검사 */
 		if (!pml4_get_page (thread_current()->pml4, (void *) page_addr))
+		{
+			sys_exit(-1);
 			return -1;
+		}
 		page_addr += PGSIZE;
 	}
 
