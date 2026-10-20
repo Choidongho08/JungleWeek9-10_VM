@@ -138,6 +138,11 @@ void
 syscall_handler (struct intr_frame *f UNUSED) {
 	switch ((SYS_CALL_NAME)f->R.rax)
 	{
+		case SYS_HALT:
+		{
+			sys_halt();
+		}
+		return;
 		case SYS_EXIT:
 		{
 			sys_exit(f->R.rdi);
@@ -148,9 +153,29 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			sys_wait(&f->R.rax, f->R.rdi);
 		}
 		return;
+		case SYS_CREATE:
+		{
+
+		}
+		return;
+		case SYS_REMOVE:
+		{
+
+		}
+		return;
 		case SYS_OPEN:
 		{
 			sys_open(&f->R.rax, f->R.rdi);
+		}
+		return;
+		case SYS_FILESIZE:
+		{
+
+		}
+		return;
+		case SYS_WRITE:
+		{
+			f->R.rax = sys_write (f->R.rdi, (const void *) f->R.rsi, f->R.rdx);
 		}
 		return;
 		case SYS_CLOSE:
@@ -228,19 +253,19 @@ sys_halt (void) {
 
 bool
 sys_create (const char *file_name, unsigned initial_size) { // 파일생성
-	lock_acquire();//FD
+	lock_acquire(&file_lock);//FD
 	bool success = filesys_create (file_name, initial_size);
 
-	lock_release();//FD
+	lock_release(&file_lock);//FD
 	return success;
 }
 
 bool
 sys_remove (const char *file_name) { //
-	lock_acquire();//FD
+	lock_acquire(&file_lock);//FD
 	bool success = filesys_remove (file_name);
 
-	lock_release();//FD
+	lock_release(&file_lock);//FD
 	return success;
 }
 
@@ -249,9 +274,9 @@ sys_filesize (int fd){
 	struct file *file = sys_filesize(fd); //fd 자리에 open()이 반환한 파일 번호 필요
 
 	if(file != NULL){
-	lock_acquire();//FD
+	lock_acquire(&file_lock);//FD
 		return file_length(file);
-	lock_release();//FD
+	lock_release(&file_lock);//FD
 	}
 	else{
 		return -1;
