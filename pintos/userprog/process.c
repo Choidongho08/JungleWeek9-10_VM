@@ -44,6 +44,8 @@ tid_t
 process_create_initd (const char *file_name) {
 	char *fn_copy;
 	tid_t tid;
+	char parse_buffer [128];	 /*	명령행 파싱을 위한 문자열 복사 버퍼, 커널의 명령행 최대길이 128 바이트 */
+	char *token, *save_ptr; 	 /* 문자열 파싱에 필요한 변수 */
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
@@ -74,8 +76,11 @@ process_create_initd (const char *file_name) {
 	aux->fn_copy = fn_copy;
 	aux->state = state;
 	
+	/* parse_buffer에 복사해서 첫 토큰 자르기. */
+	strlcpy (parse_buffer, file_name, sizeof (parse_buffer));
+	token = strtok_r (parse_buffer, " ", &save_ptr);
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, aux);
+	tid = thread_create (token, PRI_DEFAULT, initd, aux);
 	if (tid == TID_ERROR)
 	{
 		free(state);
@@ -504,7 +509,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	token = strtok_r (parse_buffer, " ", &save_ptr);
 	
 	/* Open executable file. */
-	// lock
+	// 
 	file = filesys_open (token);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
