@@ -2,7 +2,7 @@
 #define __LIB_SYSCALL_NR_H
 
 /* System call numbers. */
-enum {
+typedef enum {
 	/* Projects 2 and later. */
 	SYS_HALT,                   /* Halt the operating system. */
 	SYS_EXIT,                   /* Terminate this process. */
@@ -36,6 +36,6 @@ enum {
 
 	SYS_MOUNT,
 	SYS_UMOUNT,
-};
+}SYS_CALL_NAME;
 
 #endif /* lib/syscall-nr.h */

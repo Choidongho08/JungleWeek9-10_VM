@@ -269,6 +269,7 @@ thread_print_stats (void) {
    The code provided sets the new thread's `priority' member to
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
+
 tid_t
 thread_create (const char *name, int priority,
 		thread_func *function, void *aux) {
@@ -522,6 +523,12 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->donate_box.wait_lock = NULL; 		/* wait_lock 초기화 */
 	list_init(&t->donate_box.donated_list); /* donated_list 초기화 */
 	t->magic = THREAD_MAGIC;
+	
+	#ifdef USERPROG
+	list_init(&t->child_state_list);
+	t->last_fd = 2;
+	list_init(&t->file_list);
+#endif
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
