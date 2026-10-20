@@ -480,6 +480,11 @@ load (const char *file_name, struct intr_frame *if_) {
 			goto done;
 		if_->rsp -= sizeof (arg_addrs [i]);
 		*(char **) if_->rsp = arg_addrs [i];
+
+		/* rsi가 argv 배열의 시작 주소(&argv[0])를 가리킴 */
+		if (i == 0) {
+			if_->R.rsi = if_->rsp;
+		}
 	}
 	
 	/* 가짜 반환 주소 넣고, 해당 주소에 8바이트의 '0'을 저장한다. */
@@ -487,7 +492,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	*(uint64_t *) if_->rsp = 0;
 
 	/* 레지스터 설정. */
-	if_->R.rsi = if_->rsp;
 	if_->R.rdi = argc;
 	
 	success = true;
