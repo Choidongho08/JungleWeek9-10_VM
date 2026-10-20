@@ -7,6 +7,7 @@
 #include "filesys/inode.h"
 #include "filesys/directory.h"
 #include "devices/disk.h"
+#include "threads/thread.h"
 
 /* The disk that contains the file system. */
 struct disk *filesys_disk;
@@ -70,6 +71,20 @@ filesys_create (const char *name, off_t initial_size) {
 	dir_close (dir);
 
 	return success;
+}
+
+struct file* find_file(const int fd)
+{
+	for(struct list_elem* fd_elem = list_begin(&thread_current()->file_list); fd_elem != list_end(&thread_current()->file_list); fd_elem = list_next(fd_elem))
+	{
+		struct fd_status* fd = list_entry(fd_elem, struct fd_status, elem);
+		if(fd->fd == fd)
+		{
+			return fd->file;
+		}
+	}
+
+	return NULL;
 }
 
 /* Opens the file with the given NAME.
