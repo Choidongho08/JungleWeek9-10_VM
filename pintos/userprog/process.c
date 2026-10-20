@@ -19,6 +19,7 @@
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
 #include "intrinsic.h"
+#include "userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -320,6 +321,19 @@ process_exit (void) {
 			else
 				lock_release(&state->refer_cnt_protect_lock);
 		}
+		if(!list_empty(&curr->file_list))
+		{
+			for(struct list_elem* fd_elem = list_begin(&curr->file_list); fd_elem != list_end(&curr->file_list); fd_elem = list_next(fd_elem))
+			{
+				struct fd_status* status = list_entry(fd_elem, struct fd_status, elem);
+				
+				lock_acquire(&file_lock);
+				file_close(status->file);
+				lock_release(&file_lock);
+				list_remove(fd_elem);
+				free(status);
+			}
+		}
 	}
 	process_cleanup ();
 
@@ -544,7 +558,9 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* We arrive here whether the load is successful or not. */
+	lock_acquire(&file_lock);
 	file_close (file);
+	lock_release(&file_lock);
 	return success;
 }
 

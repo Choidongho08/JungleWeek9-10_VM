@@ -46,6 +46,87 @@ syscall_init (void) {
 	lock_init(&file_lock);
 }
 
+void sys_exit(uint64_t rdi)
+{
+	thread_current()->share_parent->exit_val = (int)rdi;
+	thread_exit();
+}
+
+void sys_wait(uint64_t* rax, uint64_t rdi)
+{
+	*rax = process_wait(rdi);
+}
+
+void sys_open(uint64_t* rax, uint64_t rdi)
+{
+	// 여기서 f->R.rdi (파일 이름)에 접근 가능한지 체크.
+	char* file_name = (char*)rdi;
+	if(file_name != NULL && is_user_vaddr(file_name))
+	{
+		for(char* i = file_name; ; ++i)
+		{
+			if(!is_user_vaddr(i) || !pml4_get_page(thread_current()->pml4, i))
+			{
+				thread_current()->share_parent->exit_val = -1;
+				thread_exit();
+				return;
+			}
+			if(*i == '\0')
+				break;
+		}
+	}
+	else
+	{
+		thread_current()->share_parent->exit_val = -1;
+		thread_exit();
+		return;
+	}
+
+	lock_acquire(&file_lock);
+	struct file* file = filesys_open(file_name);
+	if(!file)
+	{
+		lock_release(&file_lock);
+		*rax = -1;
+		return;
+	}
+	lock_release(&file_lock);
+	struct fd_status* status = malloc(sizeof (struct fd_status));
+	if(!status)
+	{
+		lock_acquire(&file_lock);
+		file_close(file);
+		lock_release(&file_lock);
+		*rax = -1;
+		return;
+	}
+	status->fd = thread_current()->last_fd++;
+	status->file = file;
+	list_push_back(&thread_current()->file_list, &status->elem);
+	*rax = status->fd;
+}
+
+void sys_close(uint64_t rdi)
+{
+	int target_fd = (int)rdi;
+	if(target_fd == 0 || target_fd == 1)
+		return;
+	
+	for(struct list_elem* fd_elem = list_begin(&thread_current()->file_list); fd_elem != list_end(&thread_current()->file_list); fd_elem = list_next(fd_elem))
+	{
+		struct fd_status* status = list_entry(fd_elem, struct fd_status, elem);
+		if(status->fd == target_fd)
+		{
+			lock_acquire(&file_lock);
+			file_close(status->file);
+			lock_release(&file_lock);
+			list_remove(fd_elem);
+			free(status);
+			return;
+		}
+	}
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
@@ -53,72 +134,24 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	{
 		case SYS_EXIT:
 		{
-			thread_current()->share_parent->exit_val = f->R.rdi;
-			thread_exit();
+			sys_exit(f->R.rdi);
 		}
 		return;
 		case SYS_WAIT:
 		{
-			f->R.rax = process_wait(f->R.rdi);
+			sys_wait(&f->R.rax, f->R.rdi);
 		}
 		return;
 		case SYS_OPEN:
 		{
-			// 여기서 f->R.rdi (파일 이름)에 접근 가능한지 체크.
-			char* file_name = (char*)f->R.rdi;
-			if(file_name != NULL && file_name < KERN_BASE)
-			{
-				for(char* i = file_name; ; ++i)
-				{
-					if(i >= KERN_BASE || !pml4_get_page(thread_current()->pml4, i))
-					{
-						thread_current()->share_parent->exit_val = -1;
-						thread_exit();
-						return;
-					}
-					if(*i == '\0')
-						break;
-				}
-			}
-			else
-			{
-				thread_current()->share_parent->exit_val = -1;
-				thread_exit();
-				return;
-			}
-
-			lock_acquire(&file_lock);
-			struct file* file = filesys_open(file_name);
-			if(!file)
-			{
-				lock_release(&file_lock);
-				f->R.rax = -1;
-				return;
-			}
-			lock_release(&file_lock);
-			struct fd_status* status = malloc(sizeof (struct fd_status));
-			if(!status)
-			{
-				lock_acquire(&file_lock);
-				file_close(file);
-				lock_release(&file_lock);
-				f->R.rax = -1;
-				return;
-			}
-
-			status->fd = thread_current()->last_fd++;
-			status->file = file;
-			list_push_back(&thread_current()->file_list, &status->elem);
-
-			f->R.rax = status->fd;
+			sys_open(&f->R.rax, f->R.rdi);
 		}
 		return;
 		case SYS_CLOSE:
 		{
-
+			sys_close(f->R.rdi);
 		}
 		return;
 	}
-	printf ("system call!\n");
 	thread_exit ();
 }
