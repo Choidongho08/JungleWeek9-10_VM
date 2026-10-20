@@ -322,9 +322,11 @@ process_exit (void) {
 				lock_release(&state->refer_cnt_protect_lock);
 		}
 		if(!list_empty(&curr->file_list))
-		{
-			for(struct list_elem* fd_elem = list_begin(&curr->file_list); fd_elem != list_end(&curr->file_list); fd_elem = list_next(fd_elem))
+		{	
+			size = list_size(&curr->file_list);
+			for(int i = 0; i < size; ++i)
 			{
+				struct list_elem* fd_elem = list_front(&curr->file_list);
 				struct fd_status* status = list_entry(fd_elem, struct fd_status, elem);
 				
 				lock_acquire(&file_lock);
