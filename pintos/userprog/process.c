@@ -127,34 +127,34 @@ duplicate_fd_table (struct thread *parent) {
 	struct thread *current = thread_current();
 	struct list *files = &parent->file_list;
 
-	for(struct list_elem *elem = list_begin(files);
-			elem != list_end(files); elem = list_next(elem)){
+	for (struct list_elem *elem = list_begin(files);
+			elem != list_end(files); elem = list_next(elem)) {
 		struct fd_status *status = list_entry(elem, struct fd_status, elem);
 		struct fd_status *copy = malloc(sizeof(struct fd_status));
-		if(copy == NULL){
+		if (copy == NULL)
 			return false;
-		}
 
 		copy->fd = status->fd;
+
 		lock_acquire(&file_lock);
 		copy->file = file_duplicate(status->file);
 		lock_release(&file_lock);
 
-		if(copy->file == NULL){
-			/* 아직 자식 목록에 넣지 않은 항목은 여기서 정리한다. */
+		if (copy->file == NULL) {
+			/* 목록에 등록하기 전의 항목은 여기서 정리한다. */
 			free(copy);
 			return false;
 		}
 
-		/* 이미 등록한 항목은 복제 실패 시 기존 process_exit에서 정리한다. */
+		/* 등록한 항목은 실패 시 기존 process_exit에서 정리한다. */
 		list_push_back(&current->file_list, &copy->elem);
 	}
 
 	current->last_fd = parent->last_fd;
 	return true;
 }
-/* Clones the current process as `name`. Returns the new process's thread id, or
- * TID_ERROR if the thread cannot be created. */
+
+/* 부모를 복제한 자식을 만들고, 성공하면 자식 TID를 반환한다. */
 tid_t
 process_fork (const char *name, struct intr_frame *if_parent) {
 	struct fork_aux context;
@@ -162,23 +162,22 @@ process_fork (const char *name, struct intr_frame *if_parent) {
 	struct child_state *state;
 	tid_t tid;
 
-	if(name == NULL || if_parent == NULL){
+	if (name == NULL || if_parent == NULL)
 		return TID_ERROR;
-	}
 
-	/* 부모는 복제 완료까지 기다리므로 두 지역 변수는 그동안 유효하다.
-	 * 스레드의 tf 대신 시스템 콜로 들어온 사용자 실행 상태를 복사한다. */
+	/* 부모가 복제 완료까지 기다리므로 지역 변수는 그동안 유효하다.
+	 * 자식은 완료 통지 후 context에 다시 접근하면 안 된다. */
 	memcpy(&parent_frame, if_parent, sizeof(struct intr_frame));
 	context.parent = thread_current();
 	context.if_ = &parent_frame;
 	context.result = false;
 	sema_init(&context.parent_wait_sema, 0);
 
-	/* 동호의 fork_aux 및 기존 child_state의 참조 2개 규칙을 사용한다. */
 	state = malloc(sizeof(struct child_state));
-	if(state == NULL){
+	if (state == NULL)
 		return TID_ERROR;
-	}
+
+	/* 자식이 실행되기 전에 공유 상태를 초기화한다. */
 	state->tid = TID_ERROR;
 	state->exit_val = -1;
 	state->refer_cnt = 2;
@@ -188,31 +187,33 @@ process_fork (const char *name, struct intr_frame *if_parent) {
 	context.state = state;
 
 	tid = thread_create(name, PRI_DEFAULT, __do_fork, &context);
-	if(tid == TID_ERROR){
-		/* 자식이 만들어지지 않았으므로 두 참조 모두 여기서 끝난다. */
+	if (tid == TID_ERROR) {
+		/* 자식이 생성되지 않았으므로 여기서 직접 해제한다. */
 		free(state);
 		return TID_ERROR;
 	}
 	state->tid = tid;
 
-	/* 파일 락 없이 기다린다. 자식은 성공과 실패 모두 한 번 통지한다. */
+	/* 자식은 복제 성공과 실패 모두 결과를 기록한 뒤 통지한다. */
 	sema_down(&context.parent_wait_sema);
-	if(context.result){
+
+	if (context.result) {
 		list_push_back(&thread_current()->child_state_list, &state->elem);
 		return tid;
 	}
 
 	/* 실패한 자식은 부모 목록에 등록하지 않는다.
-	 * 부모 참조만 내려놓고, 자식 참조는 기존 종료 경로가 정리한다. */
+	 * 부모 참조만 해제하고 자식 참조는 process_exit에서 해제한다. */
 	lock_acquire(&state->refer_cnt_protect_lock);
 	state->refer_cnt--;
-	if(state->refer_cnt == 0){
+	if (state->refer_cnt == 0) {
 		lock_release(&state->refer_cnt_protect_lock);
 		free(state);
 	}
-	else{
+	else {
 		lock_release(&state->refer_cnt_protect_lock);
 	}
+
 	return TID_ERROR;
 }
 
