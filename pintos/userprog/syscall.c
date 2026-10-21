@@ -22,6 +22,7 @@ void syscall_handler (struct intr_frame *);
 static bool sys_create (const char *file_name, unsigned initial_size);
 static bool sys_remove (const char *file_name);
 static int sys_filesize (int fd);
+static int sys_tell (int fd);
 static void sys_halt (void);
 static int sys_write (int fd, const void *buffer, unsigned size);
 
@@ -180,6 +181,11 @@ syscall_handler (struct intr_frame *f UNUSED) {
 
 		}
 		return;
+		case SYS_TELL:
+		{
+			f->R.rax = sys_tell ((int) f->R.rdi);
+		}
+		return;
 		case SYS_WRITE:
 		{
 			f->R.rax = sys_write (f->R.rdi, (const void *) f->R.rsi, f->R.rdx);
@@ -335,4 +341,26 @@ sys_filesize (int fd) {
 	int size = file_length (file);
 	lock_release (&file_lock);
 	return size;
+}
+
+static int
+sys_tell (int fd) {
+	struct file *file = NULL;
+	struct list *files = &thread_current ()->file_list;
+
+	for (struct list_elem *elem = list_begin (files);
+			elem != list_end (files); elem = list_next (elem)) {
+		struct fd_status *status = list_entry (elem, struct fd_status, elem);
+		if (status->fd == fd) {
+			file = status->file;
+			break;
+		}
+	}
+	if (file == NULL)
+		return -1;
+
+	lock_acquire (&file_lock);
+	int position = file_tell (file);
+	lock_release (&file_lock);
+	return position;
 }
