@@ -3,6 +3,15 @@
 
 #include "threads/thread.h"
 
+/* feature-fork-cdh의 공통 인터페이스를 사용한다. */
+struct fork_aux
+{
+	struct thread* parent;
+	struct intr_frame* if_;
+	struct semaphore parent_wait_sema;
+	struct child_state* state;
+	bool result;
+};
 tid_t process_create_initd (const char *file_name);
 tid_t process_fork (const char *name, struct intr_frame *if_);
 int process_exec (void *f_name);
