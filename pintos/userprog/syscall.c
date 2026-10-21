@@ -27,6 +27,7 @@ static bool sys_create (const char *file_name, unsigned initial_size);
 static bool sys_remove (const char *file_name);
 static int sys_filesize (int fd);
 static int sys_tell (int fd);
+static tid_t sys_fork (struct intr_frame *f);
 static int sys_read (int fd, void *buffer, unsigned size);
 static void sys_halt (void);
 static int sys_write (int fd, const void *buffer, unsigned size);
@@ -177,6 +178,16 @@ void sys_seek(int fd, off_t pos)
 	lock_release(&file_lock);
 }
 
+/* 사용자 주소의 이름을 확인한 뒤 부모의 사용자 실행 상태를 함께 전달한다. */
+static tid_t
+sys_fork (struct intr_frame *f) {
+	const char *name = (const char *)f->R.rdi;
+	if(!check_file_name(name)){
+		sys_exit(-1);
+		return TID_ERROR;
+	}
+	return process_fork(name, f);
+}
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
@@ -190,6 +201,11 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_EXIT:
 		{
 			sys_exit(f->R.rdi);
+		}
+		return;
+		case SYS_FORK:
+		{
+			f->R.rax = sys_fork(f);
 		}
 		return;
 		case SYS_EXEC:
