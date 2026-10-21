@@ -177,6 +177,13 @@ void sys_seek(int fd, off_t pos)
 	lock_release(&file_lock);
 }
 
+tid_t sys_fork(struct intr_frame* if_)
+{
+	struct thread* parent = thread_current();
+	tid_t child_tid = process_fork(, if_);
+	return child_tid;
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
@@ -190,6 +197,11 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_EXIT:
 		{
 			sys_exit(f->R.rdi);
+		}
+		return;
+		case SYS_FORK:
+		{
+			f->R.rax = sys_fork(f);
 		}
 		return;
 		case SYS_EXEC:

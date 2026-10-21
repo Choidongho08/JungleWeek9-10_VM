@@ -120,13 +120,58 @@ initd (void *initd_aux) {
 	NOT_REACHED ();
 }
 
+
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
 tid_t
 process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+	struct fork_aux aux;
+	aux.parent = thread_current();
+ 	sema_init(&aux.parent_wait_sema, 0);
+	aux.if_ = if_;
+	aux.result = false;
+	
+	struct child_state* child = malloc(sizeof(struct child_state));
+	if(!child)
+		return -1;
+	
+	child->exit_val = -1;
+	child->refer_cnt = 2;
+	lock_init(&child->refer_cnt_protect_lock);
+	sema_init(&child->wait_sema, 0);
+	child->waited = false;
+	aux.state = child;
+	
+	tid_t tid = thread_create (name, PRI_DEFAULT, __do_fork, &aux);
+	if(tid == -1)
+	{
+		free(child);
+		return -1;
+	}
+	
+	sema_down(&aux.parent_wait_sema);
+	
+	if(aux.result)
+	{
+		child->tid = tid;
+		list_push_back(&thread_current()->child_state_list, &child->elem);
+		return tid;
+	}
+	else
+	{
+		lock_acquire(&child->refer_cnt_protect_lock);
+		int temp_exit_val = child->exit_val;
+		child->refer_cnt--;
+		if(child->refer_cnt == 0)
+		{
+			lock_release(&child->refer_cnt_protect_lock);
+			free(child);
+		}
+		else
+			lock_release(&child->refer_cnt_protect_lock);
+		return -1;
+	}
 }
 
 #ifndef VM
@@ -167,11 +212,14 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
  *       this function. */
 static void
 __do_fork (void *aux) {
+	struct fork_aux* data = (struct fork_aux*)aux;
+
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
+	struct thread *parent = data->parent;
 	struct thread *current = thread_current ();
+	current->share_parent = data->state;
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
+	struct intr_frame *parent_if = data->if_;
 	bool succ = true;
 
 	/* 1. Read the cpu context to local stack. */
@@ -200,10 +248,16 @@ __do_fork (void *aux) {
 
 	process_init ();
 
+	data->result = succ;
+	sema_up(&data->parent_wait_sema);
+	
 	/* Finally, switch to the newly created process. */
 	if (succ)
 		do_iret (&if_);
+
 error:
+	data->result = false;
+	sema_up(&data->parent_wait_sema);
 	thread_exit ();
 }
 
