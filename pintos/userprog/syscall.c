@@ -136,6 +136,20 @@ void sys_close(uint64_t rdi)
 	}
 }
 
+void sys_seek(int fd, off_t pos)
+{
+	struct file* file = find_file(fd);
+	if(!file)
+	{
+		sys_exit(-1);
+		return;
+	}
+
+	lock_acquire(&file_lock);
+	file_seek(file, pos);
+	lock_release(&file_lock);
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
@@ -183,6 +197,11 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_WRITE:
 		{
 			f->R.rax = sys_write (f->R.rdi, (const void *) f->R.rsi, f->R.rdx);
+		}
+		return;
+		case SYS_SEEK:
+		{
+			sys_seek(f->R.rdi, f->R.rsi);
 		}
 		return;
 		case SYS_CLOSE:
