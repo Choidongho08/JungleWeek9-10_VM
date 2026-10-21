@@ -224,13 +224,6 @@ sys_write (int fd, const void *buffer, unsigned size) {
 	uintptr_t page_addr; 	   /* 현재 검사 중인 페이지 */
 	uintptr_t last_page; 	   /* 마지막 검사 대상 페이지 */
 
-	/* 1. fd 검사 */
-	if (fd != 1)	   /* 1 일 때 콘솔 출력, 1 아닐때 미구현 */
-	{
-		sys_exit(-1);
-		return -1;	   /* merge 후 잘못된 유저 포인터는 sys_exit (-1) 로 처리 */
-	}
-
 	/* 2. 버퍼 영역 검사 */
 	if (size == 0)
 		return 0;
@@ -254,7 +247,6 @@ sys_write (int fd, const void *buffer, unsigned size) {
 		
 	end_addr = start_addr + size - 1;	 	/* 마지막 바이트 주소*/
 
-	
 	/* 검사할 페이지 범위 계산 */
 	page_addr = (uintptr_t) pg_round_down (buffer);	
 	last_page = (uintptr_t) pg_round_down ((void *) end_addr);
@@ -277,9 +269,25 @@ sys_write (int fd, const void *buffer, unsigned size) {
 		page_addr += PGSIZE;
 	}
 
-	/* Console 출력 */
-	putbuf(buffer, size);
-	return size;
+	/* 1. fd 검사 */
+	if (fd == 1)	   /* 1 일 때 콘솔 출력, 1 아닐때 미구현 */
+	{
+		/* Console 출력 */
+		putbuf(buffer, size);
+		return size;
+	}
+
+ 	struct file* file = find_file(fd);
+	if(!file)
+	{
+		sys_exit(-1);
+		return -1;
+	}
+	lock_acquire(&file_lock);
+	off_t off = file_write(file, buffer, size);
+	lock_release(&file_lock);
+
+	return off;
 }
 
 void

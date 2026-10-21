@@ -77,10 +77,10 @@ struct file* find_file(const int fd)
 {
 	for(struct list_elem* fd_elem = list_begin(&thread_current()->file_list); fd_elem != list_end(&thread_current()->file_list); fd_elem = list_next(fd_elem))
 	{
-		struct fd_status* fd = list_entry(fd_elem, struct fd_status, elem);
-		if(fd->fd == fd)
+		struct fd_status* status = list_entry(fd_elem, struct fd_status, elem);
+		if(status->fd == fd)
 		{
-			return fd->file;
+			return status->file;
 		}
 	}
 
