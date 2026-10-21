@@ -20,17 +20,25 @@
 #include <string.h>
 
 void putbuf (const char *, size_t);
+static bool check_file_name (const char *file_name);
+
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
-static bool check_file_name (const char *file_name);
+
+static void sys_halt (void);
+void sys_exit (uint64_t rdi);
+static tid_t sys_fork (struct intr_frame *f);
+static void sys_exec (uint64_t rdi);
+static void sys_wait (uint64_t *rax, uint64_t rdi);
 static bool sys_create (const char *file_name, unsigned initial_size);
 static bool sys_remove (const char *file_name);
+static void sys_open (uint64_t *rax, uint64_t rdi);
 static int sys_filesize (int fd);
-static int sys_tell (int fd);
-static tid_t sys_fork (struct intr_frame *f);
 static int sys_read (int fd, void *buffer, unsigned size);
-static void sys_halt (void);
 static int sys_write (int fd, const void *buffer, unsigned size);
+static void sys_seek (int fd, off_t pos);
+static int sys_tell (int fd);
+static void sys_close (uint64_t rdi);
 
 
 /* System call.
@@ -62,16 +70,35 @@ syscall_init (void) {
 	lock_init(&file_lock);
 }
 
-void sys_exit(uint64_t rdi)
+static void
+sys_halt (void) {
+	power_off ();
+}
+
+void 
+sys_exit (uint64_t rdi)
 {
 	thread_current()->share_parent->exit_val = (int)rdi;
 	thread_exit();
 }
 
-void sys_exec (uint64_t rdi)
+/* 사용자 주소의 이름을 확인한 뒤 부모의 사용자 실행 상태를 함께 전달한다. */
+static tid_t
+sys_fork (struct intr_frame *f) {
+	const char *name = (const char *)f->R.rdi;
+	if(!check_file_name(name)){
+		sys_exit(-1);
+		return TID_ERROR;
+	}
+	return process_fork(name, f);
+}
+
+static void 
+sys_exec (uint64_t rdi)
 {
 	char *file_name = (char*) rdi;
 	char *fn_copy;
+
 	/* 유저 포인터 검사에 실패 했을 때. */
 	if(!check_file_name (file_name)){
 		sys_exit(-1);
@@ -89,12 +116,42 @@ void sys_exec (uint64_t rdi)
 		sys_exit (-1); 
 }
 
-void sys_wait(uint64_t* rax, uint64_t rdi)
+static void 
+sys_wait (uint64_t* rax, uint64_t rdi)
 {
 	*rax = process_wait(rdi);
 }
 
-void sys_open(uint64_t* rax, uint64_t rdi)
+static bool
+sys_create (const char *file_name, unsigned initial_size) { // 파일생성
+	if (!check_file_name (file_name)) {
+		sys_exit (-1);
+		return false;
+	}
+
+	lock_acquire(&file_lock);//FD
+	bool success = filesys_create (file_name, initial_size);
+
+	lock_release(&file_lock);//FD
+	return success;
+}
+
+static bool
+sys_remove (const char *file_name) {
+	if (!check_file_name (file_name)) {
+		sys_exit (-1);
+		return false;
+	}
+
+	lock_acquire(&file_lock);//FD
+	bool success = filesys_remove (file_name);
+
+	lock_release(&file_lock);//FD
+	return success;
+}
+
+static void 
+sys_open (uint64_t* rax, uint64_t rdi)
 {
 	// 여기서 f->R.rdi (파일 이름)에 접근 가능한지 체크.
 	char* file_name = (char*)rdi;
@@ -143,256 +200,6 @@ void sys_open(uint64_t* rax, uint64_t rdi)
 	*rax = status->fd;
 }
 
-void sys_close(uint64_t rdi)
-{
-	int target_fd = (int)rdi;
-	if(target_fd == 0 || target_fd == 1)
-		return;
-	
-	for(struct list_elem* fd_elem = list_begin(&thread_current()->file_list); fd_elem != list_end(&thread_current()->file_list); fd_elem = list_next(fd_elem))
-	{
-		struct fd_status* status = list_entry(fd_elem, struct fd_status, elem);
-		if(status->fd == target_fd)
-		{
-			lock_acquire(&file_lock);
-			file_close(status->file);
-			lock_release(&file_lock);
-			list_remove(fd_elem);
-			free(status);
-			return;
-		}
-	}
-}
-
-void sys_seek(int fd, off_t pos)
-{
-	struct file* file = find_file(fd);
-	if(!file)
-	{
-		sys_exit(-1);
-		return;
-	}
-
-	lock_acquire(&file_lock);
-	file_seek(file, pos);
-	lock_release(&file_lock);
-}
-
-/* 사용자 주소의 이름을 확인한 뒤 부모의 사용자 실행 상태를 함께 전달한다. */
-static tid_t
-sys_fork (struct intr_frame *f) {
-	const char *name = (const char *)f->R.rdi;
-	if(!check_file_name(name)){
-		sys_exit(-1);
-		return TID_ERROR;
-	}
-	return process_fork(name, f);
-}
-/* The main system call interface */
-void
-syscall_handler (struct intr_frame *f UNUSED) {
-	switch ((SYS_CALL_NAME)f->R.rax)
-	{
-		case SYS_HALT:
-		{
-			sys_halt();
-		}
-		return;
-		case SYS_EXIT:
-		{
-			sys_exit(f->R.rdi);
-		}
-		return;
-		case SYS_FORK:
-		{
-			f->R.rax = sys_fork(f);
-		}
-		return;
-		case SYS_EXEC:
-		{
-			sys_exec (f->R.rdi);
-		}
-		return;
-		case SYS_WAIT:
-		{
-			sys_wait(&f->R.rax, f->R.rdi);
-		}
-		return;
-		case SYS_CREATE:
-		{
-			f->R.rax = sys_create ((const char *) f->R.rdi,
-					(unsigned) f->R.rsi);
-
-		}
-		return;
-		case SYS_REMOVE:
-		{
-			f->R.rax = sys_remove ((const char *) f->R.rdi);
-
-		}
-		return;
-		case SYS_OPEN:
-		{
-			sys_open(&f->R.rax, f->R.rdi);
-		}
-		return;
-		case SYS_FILESIZE:
-		{
-			f->R.rax = sys_filesize ((int) f->R.rdi);
-
-		}
-		return;
-		case SYS_TELL:
-		{
-			f->R.rax = sys_tell ((int) f->R.rdi);
-		}
-		return;
-		case SYS_READ:
-		{
-			/* 사용자 요청의 FD, 버퍼 주소, 크기를 전달하고 읽은 양을 돌려준다. */
-			f->R.rax = sys_read ((int) f->R.rdi, (void *) f->R.rsi,
-					(unsigned) f->R.rdx);
-		}
-		return;
-		case SYS_WRITE:
-		{
-			f->R.rax = sys_write (f->R.rdi, (const void *) f->R.rsi, f->R.rdx);
-		}
-		return;
-		case SYS_SEEK:
-		{
-			sys_seek(f->R.rdi, f->R.rsi);
-		}
-		return;
-		case SYS_CLOSE:
-		{
-			sys_close(f->R.rdi);
-		}
-		return;
-	}
-	thread_exit ();
-}
-
-static bool
-check_file_name (const char *file_name) {
-	if (file_name == NULL)
-		return false;
-
-	for (const char *p = file_name; ; p++) {
-		if (!is_user_vaddr (p)
-				|| pml4_get_page (thread_current ()->pml4, p) == NULL)
-			return false;
-		if (*p == '\0')
-			return true;
-	}
-}
-
-int
-sys_write (int fd, const void *buffer, unsigned size) {
-	uintptr_t start_addr;	   /* 정수로 변환한 시작 주소 */
-	uintptr_t end_addr;	   	   /* 마지막 바이트 주소 */
-	uintptr_t page_addr; 	   /* 현재 검사 중인 페이지 */
-	uintptr_t last_page; 	   /* 마지막 검사 대상 페이지 */
-
-	/* 2. 버퍼 영역 검사 */
-	if (size == 0)
-		return 0;
-
-	/* == 버퍼 기본 유효성 검사 === */
-	/* NULL 검사 */
-	if (buffer == NULL) 
-	{
-		sys_exit(-1);
-		return -1;
-	}
-
-	start_addr = (uintptr_t) buffer; 		/* 시작 주소 */
-	
-	/* 주소 오버플로 검사 */
-	if (size - 1 > UINTPTR_MAX - start_addr)
-	{
-		sys_exit(-1);
-		return -1;
-	}
-		
-	end_addr = start_addr + size - 1;	 	/* 마지막 바이트 주소*/
-
-	/* 검사할 페이지 범위 계산 */
-	page_addr = (uintptr_t) pg_round_down (buffer);	
-	last_page = (uintptr_t) pg_round_down ((void *) end_addr);
-	
-	/* 유저 주소 범위 검사 */
-	if (!is_user_vaddr (buffer) || !is_user_vaddr ((void*) end_addr))
-	{
-		sys_exit(-1);
-		return -1;
-	}
-
-	/* 페이지 매핑 검사 */
-	while (page_addr <= last_page) {
-		/* 실제 페이지 매핑 여부 검사 */
-		if (!pml4_get_page (thread_current()->pml4, (void *) page_addr))
-		{
-			sys_exit(-1);
-			return -1;
-		}
-		page_addr += PGSIZE;
-	}
-
-	/* 1. fd 검사 */
-	if (fd == 1)	   /* 1 일 때 콘솔 출력, 1 아닐때 미구현 */
-	{
-		/* Console 출력 */
-		putbuf(buffer, size);
-		return size;
-	}
-
- 	struct file* file = find_file(fd);
-	if(!file)
-	{
-		sys_exit(-1);
-		return -1;
-	}
-	lock_acquire(&file_lock);
-	off_t off = file_write(file, buffer, size);
-	lock_release(&file_lock);
-
-	return off;
-}
-
-void
-sys_halt (void) {
-	power_off ();
-}
-
-static bool
-sys_create (const char *file_name, unsigned initial_size) { // 파일생성
-	if (!check_file_name (file_name)) {
-		sys_exit (-1);
-		return false;
-	}
-
-	lock_acquire(&file_lock);//FD
-	bool success = filesys_create (file_name, initial_size);
-
-	lock_release(&file_lock);//FD
-	return success;
-}
-
-static bool
-sys_remove (const char *file_name) {
-	if (!check_file_name (file_name)) {
-		sys_exit (-1);
-		return false;
-	}
-
-	lock_acquire(&file_lock);//FD
-	bool success = filesys_remove (file_name);
-
-	lock_release(&file_lock);//FD
-	return success;
-}
-
 static int
 sys_filesize (int fd) {
 	struct file *file = NULL;
@@ -413,28 +220,6 @@ sys_filesize (int fd) {
 	int size = file_length (file);
 	lock_release (&file_lock);
 	return size;
-}
-
-static int
-sys_tell (int fd) {
-	struct file *file = NULL;
-	struct list *files = &thread_current ()->file_list;
-
-	for (struct list_elem *elem = list_begin (files);
-			elem != list_end (files); elem = list_next (elem)) {
-		struct fd_status *status = list_entry (elem, struct fd_status, elem);
-		if (status->fd == fd) {
-			file = status->file;
-			break;
-		}
-	}
-	if (file == NULL)
-		return -1;
-
-	lock_acquire (&file_lock);
-	int position = file_tell (file);
-	lock_release (&file_lock);
-	return position;
 }
 
 static int
@@ -535,4 +320,250 @@ sys_read (int fd, void *buffer, unsigned size) {
 	/* 요청 크기보다 적을 수 있으며, 파일 끝에서 더 읽을 내용이 없으면 0이다.
 	 * 바이트 읽기이므로 문자열 종료 문자도 따로 붙이지 않는다. */
 	return bytes_read;
+}
+
+static int
+sys_write (int fd, const void *buffer, unsigned size) {
+	uintptr_t start_addr;	   /* 정수로 변환한 시작 주소 */
+	uintptr_t end_addr;	   	   /* 마지막 바이트 주소 */
+	uintptr_t page_addr; 	   /* 현재 검사 중인 페이지 */
+	uintptr_t last_page; 	   /* 마지막 검사 대상 페이지 */
+
+	/* 2. 버퍼 영역 검사 */
+	if (size == 0)
+		return 0;
+
+	/* == 버퍼 기본 유효성 검사 === */
+	/* NULL 검사 */
+	if (buffer == NULL) 
+	{
+		sys_exit(-1);
+		return -1;
+	}
+
+	start_addr = (uintptr_t) buffer; 		/* 시작 주소 */
+	
+	/* 주소 오버플로 검사 */
+	if (size - 1 > UINTPTR_MAX - start_addr)
+	{
+		sys_exit(-1);
+		return -1;
+	}
+		
+	end_addr = start_addr + size - 1;	 	/* 마지막 바이트 주소*/
+
+	/* 검사할 페이지 범위 계산 */
+	page_addr = (uintptr_t) pg_round_down (buffer);	
+	last_page = (uintptr_t) pg_round_down ((void *) end_addr);
+	
+	/* 유저 주소 범위 검사 */
+	if (!is_user_vaddr (buffer) || !is_user_vaddr ((void*) end_addr))
+	{
+		sys_exit(-1);
+		return -1;
+	}
+
+	/* 페이지 매핑 검사 */
+	while (page_addr <= last_page) {
+		/* 실제 페이지 매핑 여부 검사 */
+		if (!pml4_get_page (thread_current()->pml4, (void *) page_addr))
+		{
+			sys_exit(-1);
+			return -1;
+		}
+		page_addr += PGSIZE;
+	}
+
+	/* 1. fd 검사 */
+	if (fd == 1)	   /* 1 일 때 콘솔 출력, 1 아닐때 미구현 */
+	{
+		/* Console 출력 */
+		putbuf(buffer, size);
+		return size;
+	}
+
+ 	struct file* file = find_file(fd);
+	if(!file)
+	{
+		sys_exit(-1);
+		return -1;
+	}
+	lock_acquire(&file_lock);
+	off_t off = file_write(file, buffer, size);
+	lock_release(&file_lock);
+
+	return off;
+}
+
+
+static void
+sys_seek (int fd, off_t pos)
+{
+	struct file* file = find_file(fd);
+	if(!file)
+	{
+		sys_exit(-1);
+		return;
+	}
+
+	lock_acquire(&file_lock);
+	file_seek(file, pos);
+	lock_release(&file_lock);
+}
+
+static int
+sys_tell (int fd) {
+	struct file *file = NULL;
+	struct list *files = &thread_current ()->file_list;
+
+	for (struct list_elem *elem = list_begin (files);
+			elem != list_end (files); elem = list_next (elem)) {
+		struct fd_status *status = list_entry (elem, struct fd_status, elem);
+		if (status->fd == fd) {
+			file = status->file;
+			break;
+		}
+	}
+	if (file == NULL)
+		return -1;
+
+	lock_acquire (&file_lock);
+	int position = file_tell (file);
+	lock_release (&file_lock);
+	return position;
+}
+
+static void
+sys_close (uint64_t rdi)
+{
+	int target_fd = (int)rdi;
+	if(target_fd == 0 || target_fd == 1)
+		return;
+	
+	for(struct list_elem* fd_elem = list_begin(&thread_current()->file_list); fd_elem != list_end(&thread_current()->file_list); fd_elem = list_next(fd_elem))
+	{
+		struct fd_status* status = list_entry(fd_elem, struct fd_status, elem);
+		if(status->fd == target_fd)
+		{
+			lock_acquire(&file_lock);
+			file_close(status->file);
+			lock_release(&file_lock);
+			list_remove(fd_elem);
+			free(status);
+			return;
+		}
+	}
+}
+
+
+/* The main system call interface */
+void
+syscall_handler (struct intr_frame *f UNUSED) {
+	switch ((SYS_CALL_NAME)f->R.rax)
+	{
+		case SYS_HALT:
+		{
+			sys_halt ();
+		}
+		break;
+
+		case SYS_EXIT:
+		{
+			sys_exit (f->R.rdi);
+		}
+		break;
+
+		case SYS_FORK:
+		{
+			f->R.rax = sys_fork (f);
+		}
+		break;
+
+		case SYS_EXEC:
+		{
+			sys_exec (f->R.rdi);
+		}
+		break;
+
+		case SYS_WAIT:
+		{
+			sys_wait (&f->R.rax, f->R.rdi);
+		}
+		break;
+
+		case SYS_CREATE:
+		{
+			f->R.rax = sys_create ((const char *) f->R.rdi, (unsigned) f->R.rsi);
+		}
+		break;
+
+		case SYS_REMOVE:
+		{
+			f->R.rax = sys_remove ((const char *) f->R.rdi);
+
+		}
+		break;
+
+		case SYS_OPEN:
+		{
+			sys_open (&f->R.rax, f->R.rdi);
+		}
+		break;
+
+		case SYS_FILESIZE:
+		{
+			f->R.rax = sys_filesize ((int) f->R.rdi);
+
+		}
+		break;
+
+		case SYS_READ:
+		{
+			/* 사용자 요청의 FD, 버퍼 주소, 크기를 전달하고 읽은 양을 돌려준다. */
+			f->R.rax = sys_read ((int) f->R.rdi, (void *) f->R.rsi, (unsigned) f->R.rdx);
+		}
+		break;
+
+		case SYS_WRITE:
+		{
+			f->R.rax = sys_write (f->R.rdi, (const void *) f->R.rsi, f->R.rdx);
+		}
+		break;
+
+		case SYS_SEEK:
+		{
+			sys_seek (f->R.rdi, f->R.rsi);
+		}
+		break;
+
+		case SYS_TELL:
+		{
+			f->R.rax = sys_tell ((int) f->R.rdi);
+		}
+		break;
+
+		case SYS_CLOSE:
+		{
+			sys_close (f->R.rdi);
+		}
+		break;
+
+		default :
+			thread_exit ();
+	}
+
+}
+
+static bool
+check_file_name (const char *file_name) {
+	if (file_name == NULL)
+		return false;
+
+	for (const char *p = file_name; ; p++) {
+		if (!is_user_vaddr (p)
+				|| pml4_get_page (thread_current ()->pml4, p) == NULL)
+			return false;
+		if (*p == '\0')
+			return true;
+	}
 }
