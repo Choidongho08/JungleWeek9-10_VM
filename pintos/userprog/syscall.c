@@ -15,10 +15,13 @@
 #include "threads/malloc.h"
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
+#include "threads/palloc.h"
+#include <string.h>
 
 void putbuf (const char *, size_t);
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+static bool check_file_name (const char *file_name);
 static bool sys_create (const char *file_name, unsigned initial_size);
 static bool sys_remove (const char *file_name);
 static int sys_filesize (int fd);
@@ -59,6 +62,27 @@ void sys_exit(uint64_t rdi)
 {
 	thread_current()->share_parent->exit_val = (int)rdi;
 	thread_exit();
+}
+
+void sys_exec (uint64_t rdi)
+{
+	char *file_name = (char*) rdi;
+	char *fn_copy;
+	/* 유저 포인터 검사에 실패 했을 때. */
+	if(!check_file_name (file_name)){
+		sys_exit(-1);
+	}
+
+	/* palloc이 실패 했을 때 */
+	fn_copy = palloc_get_page (0);
+	if (fn_copy == NULL) {
+		sys_exit(-1);
+	}
+	strlcpy (fn_copy, file_name, PGSIZE);
+
+	/* process_exec이 돌아 왔을 때 */
+	if (process_exec (fn_copy) < 0)
+		sys_exit (-1); 
 }
 
 void sys_wait(uint64_t* rax, uint64_t rdi)
@@ -151,6 +175,11 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			sys_exit(f->R.rdi);
 		}
 		return;
+		case SYS_EXEC:
+		{
+			sys_exec (f->R.rdi);
+		}
+		return;
 		case SYS_WAIT:
 		{
 			sys_wait(&f->R.rax, f->R.rdi);
@@ -208,15 +237,6 @@ check_file_name (const char *file_name) {
 	}
 }
 
-/*
-	1. fd검사
-	2. 버퍼영역검사
-	3. 버퍼 기본 유효성 검사
-		3-1 버퍼 NULL 검사
-		3-2 유저 주소 범위 검사
-		3-3 페이지 매핑 검사
-	4. Console 출력
-*/
 int
 sys_write (int fd, const void *buffer, unsigned size) {
 	uintptr_t start_addr;	   /* 정수로 변환한 시작 주소 */
