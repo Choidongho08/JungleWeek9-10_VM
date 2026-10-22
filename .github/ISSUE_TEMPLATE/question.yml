@@ -1,0 +1,24 @@
+name: "💬 질문 / 논의"
+description: 설계 고민, 역할 분담, 충돌 상의 등 팀 논의가 필요할 때
+title: "[논의] "
+labels: ["question"]
+body:
+  - type: textarea
+    id: topic
+    attributes:
+      label: 논의할 내용
+      placeholder: "예: donation 을 lock 마다 리스트로 관리할지, 스레드마다 관리할지"
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: 생각해 본 방법
+      placeholder: |
+        1. ...
+        2. ...
+  - type: textarea
+    id: related
+    attributes:
+      label: 관련 코드 / 이슈 / PR
+      placeholder: "예: threads/synch.c lock_acquire(), #3"

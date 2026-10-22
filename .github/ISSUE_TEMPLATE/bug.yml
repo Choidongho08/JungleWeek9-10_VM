@@ -1,0 +1,49 @@
+name: "🐞 버그 / 테스트 실패"
+description: 테스트 실패, 커널 패닉, 이상 동작을 공유합니다.
+title: "[버그] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 증상
+      description: 무엇이 잘못됐나요?
+      placeholder: "예: priority-donate-one 이 FAIL, 또는 Kernel PANIC at ..."
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: 실패한 테스트
+      placeholder: |
+        - priority-donate-one
+        - priority-donate-nest
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 재현 방법
+      description: 실행한 명령어
+      render: bash
+      placeholder: |
+        cd pintos/threads/build
+        make tests/threads/priority-donate-one.result
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 예상 결과 vs 실제 결과
+      description: "`.output` 파일이나 diff 를 붙여넣어도 좋습니다"
+      render: text
+  - type: input
+    id: branch
+    attributes:
+      label: 발생한 브랜치 / 커밋
+      placeholder: "예: feature-priority-kim (abc1234)"
+    validations:
+      required: true
+  - type: textarea
+    id: cause
+    attributes:
+      label: 의심되는 원인
+      placeholder: 짐작 가는 함수나 최근 머지된 PR
