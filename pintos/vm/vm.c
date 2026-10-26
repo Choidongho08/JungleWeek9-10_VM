@@ -3,6 +3,7 @@
 #include "threads/malloc.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
+#include "string.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -41,8 +42,7 @@ static struct frame *vm_evict_frame (void);
  * page, do not create it directly and make it through this function or
  * `vm_alloc_page`. */
 bool
-vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
-		vm_initializer *init, void *aux) {
+vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, vm_initializer *init, void *aux) {
 
 	ASSERT (VM_TYPE(type) != VM_UNINIT)
 
@@ -62,25 +62,45 @@ err:
 
 /* Find VA from spt and return page. On error, return NULL. */
 struct page *
-spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
-	struct page *page = NULL;
+spt_find_page (struct supplemental_page_table *spt, void *va) 
+{
+	struct page *result = NULL;
 	/* TODO: Fill this function. */
 
-	return page;
+	// for문 돌면서 va와 같은 va를 갖고있는 page 찾으면 될 거 같아요 (없으면 NULL)
+	struct hash_iterator it;
+	struct hash_elem* elem;
+	for(hash_first(&it, &spt->spt_hash); elem != NULL; elem = hash_next(&it))
+	{
+		struct page* page = hash_entry(elem, struct page, spt_hash_elem);
+		if(page->va == va)
+		{
+			result = page;
+		}
+	}
+
+	return result;
 }
 
 /* Insert PAGE into spt with validation. */
 bool
-spt_insert_page (struct supplemental_page_table *spt UNUSED,
-		struct page *page UNUSED) {
+spt_insert_page (struct supplemental_page_table *spt, struct page *page) 
+{
 	int succ = false;
 	/* TODO: Fill this function. */
+
+	// spt에 page를 넣는 함수. (이미 해당 va가 있으면 false)
+	if(spt_find_page(spt, page->va))
+		return succ;
+
+	hash_insert(&spt->spt_hash, &page->spt_hash_elem);
+	succ = true;
 
 	return succ;
 }
 
-void
-spt_remove_page (struct supplemental_page_table *spt, struct page *page) {
+void spt_remove_page (struct supplemental_page_table *spt, struct page *page)
+{
 	vm_dealloc_page (page);
 	return true;
 }
@@ -171,20 +191,49 @@ vm_do_claim_page (struct page *page) {
 	return swap_in (page, frame->kva);
 }
 
+uint64_t spt_hash_hash_func(const struct hash_elem *e, void *aux)
+{
+	const struct page* p = hash_entry(e, struct page, spt_hash_elem);
+    return hash_bytes(&p->va, sizeof p->va);
+}
+
+bool spt_hash_less_func(const struct hash_elem *a, const struct hash_elem *b, void *aux)
+{
+	struct page* a_page = hash_entry(a, struct page, spt_hash_elem);
+	struct page* b_page = hash_entry(b, struct page, spt_hash_elem);
+
+	return a_page->va < b_page->va;
+}
+
 /* Initialize new supplemental page table */
-void
-supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+void supplemental_page_table_init (struct supplemental_page_table *spt UNUSED)
+{
+	hash_init(&spt->spt_hash, spt_hash_hash_func, spt_hash_less_func, NULL);
 }
 
 /* Copy supplemental page table from src to dst */
-bool
-supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
-		struct supplemental_page_table *src UNUSED) {
+bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct supplemental_page_table *src) 
+{
+	// hash 복사
+	dst->spt_hash.elem_cnt = src->spt_hash.elem_cnt;
+	dst->spt_hash.bucket_cnt = src->spt_hash.bucket_cnt;
+	dst->spt_hash.hash = src->spt_hash.hash;
+	dst->spt_hash.less = src->spt_hash.less;
+	dst->spt_hash.aux = src->spt_hash.aux;
+	dst->spt_hash.buckets = malloc(sizeof dst->spt_hash.buckets * dst->spt_hash.bucket_cnt);
+
+	struct hash_iterator it;
+	struct hash_elem* src_elem;
+	for(hash_first(&it, &src->spt_hash); src_elem != NULL; src_elem = hash_next(&it))
+	{
+		struct page* src_page = hash_entry(src_elem, struct page, spt_hash_elem);
+		vm_alloc_page(page_get_type(src_page), src_page->va, )
+	}
 }
 
 /* Free the resource hold by the supplemental page table */
-void
-supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
+void supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED)
+{
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
 }
