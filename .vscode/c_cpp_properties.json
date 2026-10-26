@@ -6,7 +6,9 @@
                 "${workspaceFolder}/**"
             ],
             "defines": [
-                "USERPROG, FILESYS"
+                "USERPROG",
+                "FILESYS",
+                "VM"
             ],
             "compilerPath": "/usr/bin/gcc",
             "cStandard": "gnu17",
