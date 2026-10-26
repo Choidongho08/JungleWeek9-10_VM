@@ -4,6 +4,7 @@
 #include "vm/vm.h"
 #include "vm/inspect.h"
 #include "string.h"
+static struct list frame_table;
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -17,6 +18,7 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+	list_init(&frame_table);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -105,23 +107,35 @@ void spt_remove_page (struct supplemental_page_table *spt, struct page *page)
 	return true;
 }
 
-/* Get the struct frame, that will be evicted. */
+/* 해제될 구조체 프레임을 가져옵니다. */
 static struct frame *
 vm_get_victim (void) {
 	struct frame *victim = NULL;
-	 /* TODO: The policy for eviction is up to you. */
+	/* TODO: 페이지 해제 정책 알아서 정하기
+	 * 지금은 FIFO 방식으로 구현해둠. 추후 clock 
+	*/
+	
+	victim = list_front(&frame_table);
+
 
 	return victim;
 }
 
-/* Evict one page and return the corresponding frame.
- * Return NULL on error.*/
+/* 한 페이지를 이동시킨 후 해당 프레임을 반환합니다.
+ * 오류 발생 시 NULL 반환.*/
 static struct frame *
 vm_evict_frame (void) {
 	struct frame *victim UNUSED = vm_get_victim ();
 	/* TODO: swap out the victim and return the evicted frame. */
-
-	return NULL;
+	if (!victim) {
+		return NULL;
+	}
+	// 해체될 프레임을 리스트에서 제거하고 swap out 해준다.
+	list_remove(victim->elem);
+	
+	swap_out(victim->page);
+	
+	return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
@@ -133,6 +147,13 @@ vm_get_frame (void) {
 	struct frame *frame = NULL;
 	/* TODO: Fill this function. */
 
+	frame = palloc_get_page(PAL_USER);
+	
+	// 꽉 찼으니 frame이 할당되지 않음. 한 페이지를 이동시킨 뒤 프레임 반환.
+	if (!frame) {
+		frame = vm_evict_frame();
+	}
+	
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
 	return frame;
@@ -156,6 +177,17 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
+
+	/* 주소 존재하지 않거나, 커널 가상 메모리를 가리키거나, 읽기 전용 페이지에 쓰려는 접근이면 페이지 폴트 */
+	if (not_present || !user || write) {
+		return false;
+	}
+	
+	/* 폴트가 발생한 페이지를 SPT에서 찾습니다.*/
+	page = spt_find_page(spt, addr);
+	if (!page) {
+		return false;
+	}
 
 	return vm_do_claim_page (page);
 }
@@ -186,7 +218,9 @@ vm_do_claim_page (struct page *page) {
 	frame->page = page;
 	page->frame = frame;
 
-	/* TODO: Insert page table entry to map page's VA to frame's PA. */
+	/* 할 일: 페이지 테이블 항목을 삽입하여 페이지의 VA를 프레임의 PA에 매핑합니다.
+	 * FIFO 를 통해 구현 */
+	list_push_back(&frame_table, frame->elem);
 
 	return swap_in (page, frame->kva);
 }
@@ -224,11 +258,11 @@ bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct s
 
 	struct hash_iterator it;
 	struct hash_elem* src_elem;
-	for(hash_first(&it, &src->spt_hash); src_elem != NULL; src_elem = hash_next(&it))
-	{
-		struct page* src_page = hash_entry(src_elem, struct page, spt_hash_elem);
-		vm_alloc_page(page_get_type(src_page), src_page->va, )
-	}
+	// for(hash_first(&it, &src->spt_hash); src_elem != NULL; src_elem = hash_next(&it))
+	// {
+	// 	struct page* src_page = hash_entry(src_elem, struct page, spt_hash_elem);
+	// 	vm_alloc_page(page_get_type(src_page), src_page->va, )
+	// }
 }
 
 /* Free the resource hold by the supplemental page table */
