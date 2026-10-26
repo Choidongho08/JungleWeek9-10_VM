@@ -4,6 +4,9 @@
 #include "vm/vm.h"
 #include "vm/inspect.h"
 #include "string.h"
+#include "list.h"
+
+static struct list frame_table;
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -17,6 +20,7 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+	list_init(&frame_table);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -50,11 +54,16 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, v
 
 	/* Check wheter the upage is already occupied or not. */
 	if (spt_find_page (spt, upage) == NULL) {
-		/* TODO: Create the page, fetch the initialier according to the VM type,
-		 * TODO: and then create "uninit" page struct by calling uninit_new. You
-		 * TODO: should modify the field after calling the uninit_new. */
+		/* TODO: 페이지를 생성하고, VM 유형에 따라 초기화자(initializer)를 가져온 뒤,
+		 * TODO: uninit_new를 호출하여 'uninit' 페이지 구조체를 생성하십시오. 
+		 * TODO: uninit_new를 호출한 후에 해당 필드를 수정해야 합니다. */
+		struct page* new_page = malloc(sizeof (struct page));
+		if(type == VM_UNINIT)
+		{
+			// uninit_new(new_page, upage)
+		}
 
-		/* TODO: Insert the page into the spt. */
+		/* TODO: 페이지를 spt(보조 페이지 테이블)에 삽입하십시오. */
 	}
 err:
 	return false;
@@ -106,10 +115,11 @@ void spt_remove_page (struct supplemental_page_table *spt, struct page *page)
 }
 
 /* Get the struct frame, that will be evicted. */
-static struct frame *
-vm_get_victim (void) {
+static struct frame* vm_get_victim (void) {
 	struct frame *victim = NULL;
-	 /* TODO: The policy for eviction is up to you. */
+	/* TODO: The policy for eviction is up to you. */
+
+	victim = list_front(&frame_table);
 
 	return victim;
 }
@@ -118,10 +128,17 @@ vm_get_victim (void) {
  * Return NULL on error.*/
 static struct frame *
 vm_evict_frame (void) {
-	struct frame *victim UNUSED = vm_get_victim ();
+	struct frame *victim = vm_get_victim ();
+	if(!victim)
+	{
+		return NULL;
+	}
 	/* TODO: swap out the victim and return the evicted frame. */
 
-	return NULL;
+	list_remove(victim->elem);
+	swap_out(victim->page);
+
+	return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
@@ -132,6 +149,12 @@ static struct frame *
 vm_get_frame (void) {
 	struct frame *frame = NULL;
 	/* TODO: Fill this function. */
+	frame = palloc_get_page(PAL_USER);
+
+	if(!frame)
+	{
+		frame = vm_evict_frame();
+	}
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
@@ -150,12 +173,23 @@ vm_handle_wp (struct page *page UNUSED) {
 
 /* Return true on success */
 bool
-vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
-		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
-	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
+vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bool not_present) 
+{
+	struct supplemental_page_table *spt = &thread_current ()->spt;
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
+
+	if(!user || !write || !not_present)
+	{
+		return false;
+	}
+
+	page = spt_find_page(spt, addr);
+	if(!page)
+	{
+		return false;
+	}
 
 	return vm_do_claim_page (page);
 }
@@ -187,6 +221,7 @@ vm_do_claim_page (struct page *page) {
 	page->frame = frame;
 
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
+	list_push_back(&frame_table, frame->elem);
 
 	return swap_in (page, frame->kva);
 }
@@ -214,21 +249,6 @@ void supplemental_page_table_init (struct supplemental_page_table *spt UNUSED)
 /* Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct supplemental_page_table *src) 
 {
-	// hash 복사
-	dst->spt_hash.elem_cnt = src->spt_hash.elem_cnt;
-	dst->spt_hash.bucket_cnt = src->spt_hash.bucket_cnt;
-	dst->spt_hash.hash = src->spt_hash.hash;
-	dst->spt_hash.less = src->spt_hash.less;
-	dst->spt_hash.aux = src->spt_hash.aux;
-	dst->spt_hash.buckets = malloc(sizeof dst->spt_hash.buckets * dst->spt_hash.bucket_cnt);
-
-	struct hash_iterator it;
-	struct hash_elem* src_elem;
-	for(hash_first(&it, &src->spt_hash); src_elem != NULL; src_elem = hash_next(&it))
-	{
-		struct page* src_page = hash_entry(src_elem, struct page, spt_hash_elem);
-		vm_alloc_page(page_get_type(src_page), src_page->va, )
-	}
 }
 
 /* Free the resource hold by the supplemental page table */
