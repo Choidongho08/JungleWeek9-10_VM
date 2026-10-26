@@ -37,10 +37,10 @@ struct thread;
 
 #define VM_TYPE(type) ((type) & 7)
 
-/* The representation of "page".
- * This is kind of "parent class", which has four "child class"es, which are
+/* "page"의 표현입니다.
+ * 이것은 일종의 "부모 클래스"로, 4개의 자식 클래스를 가지고 있습니다. 
  * uninit_page, file_page, anon_page, and page cache (project4).
- * DO NOT REMOVE/MODIFY PREDEFINED MEMBER OF THIS STRUCTURE. */
+ * 이 구조의 미리 정의된 멤버를 제거하거나 수정하지 마십시오. */
 struct page {
 	const struct page_operations *operations;
 	void *va;              /* Address in terms of user space */
@@ -49,8 +49,12 @@ struct page {
 
 	/* Your implementation */
 
-	/* Per-type data are binded into the union.
-	 * Each function automatically detects the current union */
+	/* 타입별 데이터가 union에 바인딩됩니다.
+	 * 각 함수는 현재 union을 자동으로 감지합니다. */
+	
+	/* union은 같은 메모리 영역에 
+	* 서로 다른 자료형을 저장할 수 있는 특별한 자료형입니다. 
+	* 여러 멤버가 있지만, 한 시점에는 하나의 멤버만 유효한 값을 담습니다. */
 	union {
 		struct uninit_page uninit;
 		struct anon_page anon;
@@ -65,12 +69,14 @@ struct page {
 struct frame {
 	void *kva;
 	struct page *page;
+	struct list_elem *elem;
 };
 
-/* The function table for page operations.
- * This is one way of implementing "interface" in C.
- * Put the table of "method" into the struct's member, and
- * call it whenever you needed. */
+/* 페이지 작업을 위한 함수 테이블입니다.
+ * 이것은 C의 "interface"를 구현하는 한 가지 방법입니다.
+ * "method" 테이블을 구조체 멤버에 넣고, 
+ * 필요할 때마다 부르세요. */
+
 struct page_operations {
 	bool (*swap_in) (struct page *, void *);
 	bool (*swap_out) (struct page *);
@@ -83,9 +89,9 @@ struct page_operations {
 #define destroy(page) \
 	if ((page)->operations->destroy) (page)->operations->destroy (page)
 
-/* Representation of current process's memory space.
- * We don't want to force you to obey any specific design for this struct.
- * All designs up to you for this. */
+/* 현재 프로세스의 메모리 공간 표현.
+ * 이 구조체에 대해 특정 설계를 강제로 따르게 하고 싶지는 않습니다.
+ * 이 디자인은 전부 당신이 결정하세요. */
 struct supplemental_page_table {
 	struct hash spt_hash;
 };
