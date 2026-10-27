@@ -125,8 +125,7 @@ populate_pools (struct area *base_mem, struct area *ext_mem) {
 	void *free_start = pg_round_up (&_end);
 
 	uint64_t total_pages = (base_mem->size + ext_mem->size) / PGSIZE;
-	uint64_t user_pages = total_pages / 2 > user_page_limit ?
-		user_page_limit : total_pages / 2;
+	uint64_t user_pages = total_pages / 2 > user_page_limit ? user_page_limit : total_pages / 2;
 	uint64_t kern_pages = total_pages - user_pages;
 
 	// Parse E820 map to claim the memory region for each pool.
