@@ -70,6 +70,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, v
 
 		/* TODO: 페이지를 spt(보조 페이지 테이블)에 삽입하십시오. */
 		hash_insert(&spt->spt_hash, &new_page->spt_hash_elem);
+		return true;
 	}
 err:
 	return false;
