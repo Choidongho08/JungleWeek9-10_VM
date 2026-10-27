@@ -20,6 +20,7 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+
 	list_init(&frame_table);
 }
 
@@ -58,12 +59,17 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, v
 		 * TODO: uninit_new를 호출하여 'uninit' 페이지 구조체를 생성하십시오. 
 		 * TODO: uninit_new를 호출한 후에 해당 필드를 수정해야 합니다. */
 		struct page* new_page = malloc(sizeof (struct page));
-		if(type == VM_UNINIT)
+		if(type == VM_ANON)
 		{
-			// uninit_new(new_page, upage)
+			uninit_new(new_page, upage, init, type, aux, anon_initializer);
+		}
+		if(type == VM_FILE)
+		{
+			uninit_new(new_page, upage, init, type, aux, file_backed_initializer);
 		}
 
 		/* TODO: 페이지를 spt(보조 페이지 테이블)에 삽입하십시오. */
+		hash_insert(&spt->spt_hash, &new_page->spt_hash_elem);
 	}
 err:
 	return false;
@@ -136,7 +142,15 @@ vm_evict_frame (void) {
 	/* TODO: swap out the victim and return the evicted frame. */
 
 	list_remove(victim->elem);
-	swap_out(victim->page);
+	if(page_get_type(victim->page) == VM_ANON)
+	{
+		swap_out(victim->page);
+	}
+	else
+	{
+		// 우선 destroy하지만 나중에 file이 dirty상태라면 swap_out
+		destroy(victim->page);
+	}
 
 	return victim;
 }
@@ -145,16 +159,20 @@ vm_evict_frame (void) {
  * and return it. This always return valid address. That is, if the user pool
  * memory is full, this function evicts the frame to get the available memory
  * space.*/
-static struct frame *
-vm_get_frame (void) {
+static struct frame* vm_get_frame (void) {
 	struct frame *frame = NULL;
 	/* TODO: Fill this function. */
-	frame = palloc_get_page(PAL_USER);
-
-	if(!frame)
+	void* kva = palloc_get_page(PAL_USER);
+	if(!kva)
 	{
 		frame = vm_evict_frame();
 	}
+	else
+	{
+		frame = malloc(sizeof(struct frame));
+	}
+	frame->kva = kva;
+	frame->page = NULL;
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
@@ -212,8 +230,8 @@ vm_claim_page (void *va UNUSED) {
 }
 
 /* Claim the PAGE and set up the mmu. */
-static bool
-vm_do_claim_page (struct page *page) {
+static bool vm_do_claim_page (struct page *page) 
+{
 	struct frame *frame = vm_get_frame ();
 
 	/* Set links */
@@ -223,7 +241,7 @@ vm_do_claim_page (struct page *page) {
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
 	list_push_back(&frame_table, frame->elem);
 
-	return swap_in (page, frame->kva);
+	return swap_in (page, frame->kva); // 여기서 vm_alloc_page_with_initializer 때 넣었던 vm_type따라서 init실행 및 설정됨
 }
 
 uint64_t spt_hash_hash_func(const struct hash_elem *e, void *aux)
