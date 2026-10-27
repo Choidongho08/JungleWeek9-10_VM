@@ -43,17 +43,20 @@ uninit_new (struct page *page, void *va, vm_initializer *init,
 }
 
 /* Initalize the page on first fault */
+/* 첫 번째 폴트에서 페이지를 초기화합니다. 템플릿은 먼저 `vm_initializer`와 `aux`를 가져오고, 
+함수 포인터를 통해 해당 `page_initializer`를 호출합니다. 설계에 맞게 수정할 수 있습니다.
+필요에 따라 `vm/anon.c`의 `vm_anon_init`과 `anon_initializer`를 수정할 수 있습니다.*/
 static bool
 uninit_initialize (struct page *page, void *kva) {
 	struct uninit_page *uninit = &page->uninit;
 
-	/* Fetch first, page_initialize may overwrite the values */
+	/* 먼저 가져오기, page_initialize가 값을 덮어쓸 수 있음 */
 	vm_initializer *init = uninit->init;
 	void *aux = uninit->aux;
 
-	/* TODO: You may need to fix this function. */
-	return uninit->page_initializer (page, uninit->type, kva) &&
-		(init ? init (page, aux) : true);
+	/* 할 일: 이 함수를 수정해야 할 수도 있습니다. */
+	// 
+	return uninit->page_initializer (page, uninit->type, kva) && (init ? init(page, aux) : true);
 }
 
 /* Free the resources hold by uninit_page. Although most of pages are transmuted

@@ -803,9 +803,9 @@ install_page (void *upage, void *kpage, bool writable) {
 
 static bool
 lazy_load_segment (struct page *page, void *aux) {
-	/* TODO: Load the segment from the file */
-	/* TODO: This called when the first page fault occurs on address VA. */
-	/* TODO: VA is available when calling this function. */
+	/* 할 일: 파일에서 세그먼트를 불러오기 */
+	/* 할 일: 첫 번째 페이지 폴트가 VA 주소에서 발생할 때 호출됩니다. */
+	/* 할 일: 이 함수를 호출할 때 VA가 사용 가능합니다. */
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -836,10 +836,9 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-		/* TODO: Set up aux to pass information to the lazy_load_segment. */
+		/* 할 일: aux를 설정하여 lazy_load_segment에 정보를 전달합니다. */
 		void *aux = NULL;
-		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
-					writable, lazy_load_segment, aux))
+		if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable, lazy_load_segment, aux))
 			return false;
 
 		/* Advance. */

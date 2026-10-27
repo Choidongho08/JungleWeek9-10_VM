@@ -44,19 +44,34 @@ static struct frame *vm_evict_frame (void);
  * page, do not create it directly and make it through this function or
  * `vm_alloc_page`. */
 bool
-vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, vm_initializer *init, void *aux) {
-
+vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, vm_initializer *init, void *aux) 
+{
 	ASSERT (VM_TYPE(type) != VM_UNINIT)
 
 	struct supplemental_page_table *spt = &thread_current ()->spt;
 
 	/* Check wheter the upage is already occupied or not. */
 	if (spt_find_page (spt, upage) == NULL) {
-		/* TODO: Create the page, fetch the initialier according to the VM type,
-		 * TODO: and then create "uninit" page struct by calling uninit_new. You
-		 * TODO: should modify the field after calling the uninit_new. */
-
-		/* TODO: Insert the page into the spt. */
+		/* 할 일: 페이지 생성, VM 타입에 따라 초기화값 가져오기,
+		 * TODO: 그 다음 uninit_new를 호출하여 "uninit" 페이지 구조체를 생성합니다.
+		 * TODO: uninit_new 호출 후 필드를 수정해야 합니다. */
+		
+		struct page* page = malloc(sizeof(struct page));
+		if(type == VM_ANON)
+		{
+			uninit_new(page, upage, init, type, aux, anon_initializer);
+		}
+		if(type == VM_FILE)
+		{
+			uninit_new(page, upage, init, type, aux, file_backed_initializer);
+		}
+		// if문으로 vm_type마다 초기화 함수 선택.
+		
+		/* 페이지 구조체를 만든 뒤에는 해당 프로세스의 보조 페이지 테이블에 삽입하세요. 
+		vm.h의 VM_TYPE 매크로를 사용하면 편리할 수 있습니다.*/
+		
+		/* 할 일: 페이지를 spt에 삽입한다. vm.h의 VM_TYPE 매크로를 사용 */
+		spt_insert_page(&thread_current()->spt.spt_hash, page);
 	}
 err:
 	return false;
