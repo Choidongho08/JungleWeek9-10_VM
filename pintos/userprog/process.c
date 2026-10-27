@@ -23,6 +23,7 @@
 #ifdef VM
 #include "vm/vm.h"
 #endif
+#define VM
 
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);

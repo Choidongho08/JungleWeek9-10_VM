@@ -4,6 +4,8 @@
 #include "vm/vm.h"
 #include "vm/inspect.h"
 #include "string.h"
+#include "threads/vaddr.h"
+#include "threads/mmu.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -110,7 +112,7 @@ static struct frame *
 vm_get_victim (void) {
 	struct frame *victim = NULL;
 	 /* TODO: The policy for eviction is up to you. */
-
+	
 	return victim;
 }
 
@@ -119,8 +121,8 @@ vm_get_victim (void) {
 static struct frame *
 vm_evict_frame (void) {
 	struct frame *victim UNUSED = vm_get_victim ();
-	/* TODO: swap out the victim and return the evicted frame. */
-
+	/* TODO: swap out the victim and return the evicted frame. */	
+	
 	return NULL;
 }
 
@@ -132,6 +134,7 @@ static struct frame *
 vm_get_frame (void) {
 	struct frame *frame = NULL;
 	/* TODO: Fill this function. */
+	if (frame)
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
@@ -154,8 +157,36 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
 	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
 	struct page *page = NULL;
+	struct vm_types *type = page_get_type(page);
+	struct frame *frame;
+	
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
+	
+	// 1. 폴트가 발생한 페이지를 보조 페이지 테이블에서 찾습니다
+	//  유효한 메모리 참조라면 해당 항목을 사용하여 페이지에 들어갈 데이터가 어디에 있는지 찾습니다. 
+	// 	데이터는 파일 시스템이나 스왑 슬롯에 있을 수 있고, 단순히 0으로 채워야 하는 페이지일 수도 있습니다
+	//	해당 주소에 데이터가 존재할 이유가 없거나, 커널 가상 메모리를 가리키거나, 
+	//	읽기 전용 페이지에 쓰려는 접근이라면 잘못된 접근입니다.
+	// 	잘못된 접근은 프로세스를 종료하고 모든 자원을 해제해야 합니다.
+	page = spt_find_page(spt, addr);
+	
+	if (page == NULL)
+		return false;
+	
+	if (not_present || !user || write)
+		return false;
+	
+	// 2. 페이지를 저장할 프레임을 확보합니다. 
+	// 	공유를 구현했다면 필요한 데이터가 이미 프레임에 있을 수 있으므로 해당 프레임을 찾을 수 있어야 합니다
+	frame = vm_get_frame();
+
+	// 3. 파일 시스템이나 스왑에서 데이터를 읽거나 0으로 채우는 등의 방법으로 프레임에 내용을 준비합니다. 
+	// 	공유를 구현했고 필요한 페이지가 이미 프레임에 있다면 이 단계에서 할 일이 없을 수도 있습니다.
+	palloc_get_page(PAL_USER);
+
+	// 4. 폴트가 발생한 가상 주소의 페이지 테이블 항목이 해당 물리 페이지를 가리키도록 설정합니다. 
+	// 	threads/mmu.c의 함수를 사용할 수 있습니다.
 
 	return vm_do_claim_page (page);
 }
@@ -222,12 +253,50 @@ bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct s
 	dst->spt_hash.aux = src->spt_hash.aux;
 	dst->spt_hash.buckets = malloc(sizeof dst->spt_hash.buckets * dst->spt_hash.bucket_cnt);
 
-	struct hash_iterator it;
-	struct hash_elem* src_elem;
-	for(hash_first(&it, &src->spt_hash); src_elem != NULL; src_elem = hash_next(&it))
-	{
-		struct page* src_page = hash_entry(src_elem, struct page, spt_hash_elem);
-		vm_alloc_page(page_get_type(src_page), src_page->va, )
+
+struct hash_iterator dst_it;
+	struct hash_iterator src_it;
+	struct hash_elem* dst_elem;
+	struct hash_elem* cur_elem;
+	
+	// struct list* src_bucket = src->spt_hash.buckets;
+	// for(struct list_elem* src_elem = list_front(src_bucket); src_elem != list_end(src_bucket); src_elem = list_next(src_elem))
+	// {
+	// 	struct list* dst_bucket = malloc(sizeof (struct list));
+	// 	list_init(dst_bucket);
+		
+	// 	for()
+	// }
+
+
+
+	hash_first(&src_it, &src->spt_hash); // src의 시작점 저장
+	hash_first(&dst_it, &dst->spt_hash); // dst의 시작점 저장
+	
+	struct list* src_bucket = src->spt_hash.buckets;
+	while (src_elem != NULL) {
+
+		// struct page* page = malloc(sizeof(struct page));
+		// cur_elem = hash_entry(hash_elem, );
+		// hash_insert(&dst->spt_hash, );
+		
+		
+		struct list* dst_bucket = malloc(sizeof (struct list));
+		list_init(dst_bucket);
+
+		// 한 버킷을 처음부터 끝까지 돌음.
+		for(struct list_elem* src_elem = list_front(src_bucket); src_elem != list_end(src_bucket); src_elem = list_next(src_elem))
+		{
+			// dst의 안에 넣어줘요 list push back으로.
+			hash_entry(src_ele1, struct hash_iterator, hash_elem);
+		}
+
+
+		if (list_next(src_elem) == NULL) {
+		 	hash_next(&src_it);	
+			list_elem_to_hash_elem(list_next(&dst->spt_hash.buckets));
+		}
+
 	}
 }
 

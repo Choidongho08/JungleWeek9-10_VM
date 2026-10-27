@@ -46,7 +46,7 @@ struct page {
 	void *va;              /* Address in terms of user space */
 	struct frame *frame;   /* Back reference for frame */
 	struct hash_elem spt_hash_elem;
-
+u
 	/* Your implementation */
 
 	/* Per-type data are binded into the union.
