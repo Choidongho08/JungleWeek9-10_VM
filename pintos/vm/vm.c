@@ -4,6 +4,7 @@
 #include "vm/vm.h"
 #include "vm/inspect.h"
 #include "string.h"
+#include "threads/mmu.h"
 static struct list frame_table;
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
@@ -146,8 +147,9 @@ vm_evict_frame (void) {
 		return NULL;
 	}
 	// 해체될 프레임을 리스트에서 제거하고 swap out 해준다.
-	list_remove(victim->elem);
 	
+	pml4_clear_page(thread_current()->pml4, victim->page->va);
+	list_remove(victim->elem);
 	swap_out(victim->page);
 	
 	return victim;
@@ -162,13 +164,21 @@ vm_get_frame (void) {
 	struct frame *frame = NULL;
 	/* TODO: Fill this function. */
 
-	frame = palloc_get_page(PAL_USER);
+	void* kva = palloc_get_page(PAL_USER);
 	
-	// 꽉 찼으니 frame이 할당되지 않음. 한 페이지를 이동시킨 뒤 프레임 반환.
-	if (!frame) {
+	if(!kva)
+	{
 		frame = vm_evict_frame();
 	}
-	
+	else
+	{
+		frame = malloc(sizeof(struct frame));
+	}
+
+	frame->kva = kva;
+	frame->page = NULL;
+	list_push_back(&frame_table, frame->elem);
+
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
 	return frame;
@@ -235,6 +245,7 @@ vm_do_claim_page (struct page *page) {
 
 	/* 할 일: 페이지 테이블 항목을 삽입하여 페이지의 VA를 프레임의 PA에 매핑합니다.
 	 * FIFO 를 통해 구현 */
+	pml4_set_page(&thread_current()->pml4, page->va, frame->kva, true);
 	list_push_back(&frame_table, frame->elem);
 
 	return swap_in (page, frame->kva);
