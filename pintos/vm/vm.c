@@ -5,6 +5,7 @@
 #include "vm/inspect.h"
 #include "string.h"
 #include "list.h"
+#include "threads/mmu.h"
 
 static struct list frame_table;
 
@@ -59,11 +60,11 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, v
 		 * TODO: uninit_new를 호출하여 'uninit' 페이지 구조체를 생성하십시오. 
 		 * TODO: uninit_new를 호출한 후에 해당 필드를 수정해야 합니다. */
 		struct page* new_page = malloc(sizeof (struct page));
-		if(type == VM_ANON)
+		if(VM_TYPE(VM_ANON))
 		{
 			uninit_new(new_page, upage, init, type, aux, anon_initializer);
 		}
-		if(type == VM_FILE)
+		if(VM_TYPE(VM_FILE))
 		{
 			uninit_new(new_page, upage, init, type, aux, file_backed_initializer);
 		}
@@ -83,7 +84,7 @@ spt_find_page (struct supplemental_page_table *spt, void *va)
 	struct page *result = NULL;
 	/* TODO: Fill this function. */
 
-	pg_round_down(va); // va의 값이 가상 주소의 시작점을 의미하겠다는 보장이 없다. 그러니 pg_round_down을 통해 시작점으로 맞춰준다.
+	// pg_round_down(va); // va의 값이 가상 주소의 시작점을 의미하겠다는 보장이 없다. 그러니 pg_round_down을 통해 시작점으로 맞춰준다.
 
 	// for문 돌면서 va와 같은 va를 갖고있는 page 찾으면 될 거 같아요 (없으면 NULL)
 	struct hash_iterator it;
@@ -161,17 +162,18 @@ vm_evict_frame (void) {
 	return victim;
 }
 
-/* palloc() and get frame. If there is no available page, evict the page
- * and return it. This always return valid address. That is, if the user pool
- * memory is full, this function evicts the frame to get the available memory
- * space.*/
+/* palloc() 및 프레임 가져오기. 
+ * 사용 가능한 페이지가 없으면 해당 페이지를 제거하고 반환합니다. 
+ * 항상 유효한 주소가 반환됩니다. 
+ * 즉, 사용자 풀 메모리가 가득 찼을 경우, 이 함수는 사용 가능한 메모리 공간을 확보하기 위해 프레임을 제거합니다
+ *공간.*/
 static struct frame* vm_get_frame (void) {
 	struct frame *frame = NULL;
 	/* TODO: Fill this function. */
 	void* kva = palloc_get_page(PAL_USER);
 	if(!kva)
 	{
-		frame = vm_evict_frame();
+		frame = vm_evict_frame(); // kva가 할당되지 않았다는 건 유저프로그램에 꽉 찼다는 뜻이니, 하나를 내쫓고 프레임을 할당한다.
 	}
 	else
 	{
@@ -232,7 +234,14 @@ vm_dealloc_page (struct page *page) {
 bool
 vm_claim_page (void *va UNUSED) {
 	struct page *page = NULL;
-	/* TODO: Fill this function */
+	/* 페이지에 물리 프레임을 할당합니다. 
+	먼저 템플릿에 이미 작성되어 있는 vm_get_frame 호출로 프레임을 얻습니다. 
+	그다음 MMU를 설정해야 합니다. 즉, 페이지 테이블에 가상 주소에서 물리 주소로의 매핑을 추가합니다. 
+	반환값은 작업의 성공 여부를 나타내야 합니다. */
+	page = spt_find_page(&thread_current()->spt, va);
+	if (page == NULL) {
+		return false;
+	}
 
 	return vm_do_claim_page (page);
 }

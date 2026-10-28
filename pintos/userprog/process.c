@@ -866,7 +866,9 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes,
 		/* Advance. */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
-		upage += PGSIZE;
+		ofs += page_read_bytes;
+
+		upage += PGSIZE; 
 	}
 	return true;
 }
@@ -881,7 +883,7 @@ setup_stack (struct intr_frame *if_) {
 	 * TODO: 성공하면 rsp를 적절히 설정하세요.
 	 * TODO: 페이지에 스택임을 표시해야 합니다. */
 
-	if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, false))
+	if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, true))
 	{
 		if(vm_claim_page(stack_bottom))
 		{
