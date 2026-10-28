@@ -817,7 +817,7 @@ lazy_load_segment (struct page *page, void *aux)
 
 	// buffer는 적재될 곳이다. 그래서 우리는 disk 안에 넣어야한다. disk는 kva에 위치한다.
 	// buffer는 걍 디스크 공간을 가리키는 거라고 생각함... 파일이 있는 곳. 파일이 디스크에 있음. 그래서 kva로 봐야한다. 
-	off_t off = file_read(entry->file, page->frame->kva, entry->offset); 
+	off_t off = file_read(entry->file, page->frame->kva, entry->read_bytes); 
 	
 	// 물리 메모리에 적재를 해.
 	memset(page->frame->kva + entry->read_bytes, 0, entry->zero_bytes);
@@ -877,11 +877,18 @@ setup_stack (struct intr_frame *if_) {
 	bool success = false;
 	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
 
-	/* TODO: Map the stack on stack_bottom and claim the page immediately.
-	 * TODO: If success, set the rsp accordingly.
-	 * TODO: You should mark the page is stack. */
-	/* TODO: Your code goes here */
+	/* TODO: stack_bottom에 스택을 매핑하고 페이지를 즉시 할당한다.
+	 * TODO: 성공하면 rsp를 적절히 설정하세요.
+	 * TODO: 페이지에 스택임을 표시해야 합니다. */
 
+	if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, false))
+	{
+		if(vm_claim_page(stack_bottom))
+		{
+			if_->rsp = stack_bottom;
+			success = true;
+		}
+	}
 	return success;
 }
 #endif /* VM */

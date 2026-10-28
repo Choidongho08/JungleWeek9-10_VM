@@ -83,10 +83,15 @@ spt_find_page (struct supplemental_page_table *spt, void *va)
 	struct page *result = NULL;
 	/* TODO: Fill this function. */
 
+	pg_round_down(va); // va의 값이 가상 주소의 시작점을 의미하겠다는 보장이 없다. 그러니 pg_round_down을 통해 시작점으로 맞춰준다.
+
 	// for문 돌면서 va와 같은 va를 갖고있는 page 찾으면 될 거 같아요 (없으면 NULL)
 	struct hash_iterator it;
 	struct hash_elem* elem;
-	for(hash_first(&it, &spt->spt_hash); elem != NULL; elem = hash_next(&it))
+	hash_first(&it, &spt->spt_hash);
+
+	// it에 첫번째 elem은 head 값이 들어있다. Head의 다음 값부터 시작하도록 설정한다.
+	for(elem = hash_next(&it); elem != NULL; elem = hash_next(&it))
 	{
 		struct page* page = hash_entry(elem, struct page, spt_hash_elem);
 		if(page->va == va)
@@ -199,11 +204,13 @@ vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bo
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
 
-	if(!user || !write || !not_present)
+	/* 커녈 영역에 있진 않는지, 쓰기 가능한지, 존재하는지 확인 */
+	if(!user || !write || not_present)
 	{
 		return false;
 	}
 
+	/* 오류가 난 주소가 SPT에 저장 되어 있는지 확인 */
 	page = spt_find_page(spt, addr);
 	if(!page)
 	{
