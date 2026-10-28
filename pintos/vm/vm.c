@@ -19,6 +19,8 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+
+	list_init(&frame_table);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -117,11 +119,12 @@ void spt_remove_page (struct supplemental_page_table *spt, struct page *page)
 }
 
 /* Get the struct frame, that will be evicted. */
-static struct frame *
-vm_get_victim (void) {
+static struct frame* vm_get_victim (void) {
 	struct frame *victim = NULL;
-	 /* TODO: The policy for eviction is up to you. */
-	
+	/* TODO: The policy for eviction is up to you. */
+
+	victim = list_front(&frame_table);
+
 	return victim;
 }
 
@@ -129,21 +132,45 @@ vm_get_victim (void) {
  * Return NULL on error.*/
 static struct frame *
 vm_evict_frame (void) {
-	struct frame *victim UNUSED = vm_get_victim ();
-	/* TODO: swap out the victim and return the evicted frame. */	
-	
-	return NULL;
+	struct frame *victim = vm_get_victim ();
+	if(!victim)
+	{
+		return NULL;
+	}
+	/* TODO: swap out the victim and return the evicted frame. */
+
+	list_remove(victim->elem);
+	if(page_get_type(victim->page) == VM_ANON)
+	{
+		swap_out(victim->page);
+	}
+	else
+	{
+		// 우선 destroy하지만 나중에 file이 dirty상태라면 swap_out
+		destroy(victim->page);
+	}
+
+	return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
  * and return it. This always return valid address. That is, if the user pool
  * memory is full, this function evicts the frame to get the available memory
  * space.*/
-static struct frame *
-vm_get_frame (void) {
+static struct frame* vm_get_frame (void) {
 	struct frame *frame = NULL;
 	/* TODO: Fill this function. */
-	if (frame)
+	void* kva = palloc_get_page(PAL_USER);
+	if(!kva)
+	{
+		frame = vm_evict_frame();
+	}
+	else
+	{
+		frame = malloc(sizeof(struct frame));
+	}
+	frame->kva = kva;
+	frame->page = NULL;
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
@@ -162,9 +189,9 @@ vm_handle_wp (struct page *page UNUSED) {
 
 /* Return true on success */
 bool
-vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
-		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
-	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
+vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bool not_present) 
+{
+	struct supplemental_page_table *spt = &thread_current ()->spt;
 	struct page *page = NULL;
 	struct vm_types *type = page_get_type(page);
 	struct frame *frame;
@@ -197,6 +224,17 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	// 4. 폴트가 발생한 가상 주소의 페이지 테이블 항목이 해당 물리 페이지를 가리키도록 설정합니다. 
 	// 	threads/mmu.c의 함수를 사용할 수 있습니다.
 
+	if(!user || !write || !not_present)
+	{
+		return false;
+	}
+
+	page = spt_find_page(spt, addr);
+	if(!page)
+	{
+		return false;
+	}
+
 	return vm_do_claim_page (page);
 }
 
@@ -218,8 +256,8 @@ vm_claim_page (void *va UNUSED) {
 }
 
 /* Claim the PAGE and set up the mmu. */
-static bool
-vm_do_claim_page (struct page *page) {
+static bool vm_do_claim_page (struct page *page) 
+{
 	struct frame *frame = vm_get_frame ();
 
 	/* Set links */
@@ -227,8 +265,9 @@ vm_do_claim_page (struct page *page) {
 	page->frame = frame;
 
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
+	list_push_back(&frame_table, frame->elem);
 
-	return swap_in (page, frame->kva);
+	return swap_in (page, frame->kva); // 여기서 vm_alloc_page_with_initializer 때 넣었던 vm_type따라서 init실행 및 설정됨
 }
 
 uint64_t spt_hash_hash_func(const struct hash_elem *e, void *aux)
