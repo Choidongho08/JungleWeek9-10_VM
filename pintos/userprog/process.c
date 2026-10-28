@@ -807,6 +807,18 @@ lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
 	/* TODO: This called when the first page fault occurs on address VA. */
 	/* TODO: VA is available when calling this function. */
+	struct vm_entry *entry = (struct vm_entry *) aux;
+
+	// 오프셋을 통해서 디스크에서 메모리 위치를 찾아.
+	// 오프셋을 먼저 맞추고 읽어라.
+	file_seek(entry->file, entry->offset);
+
+	// buffer는 적재될 곳이다. 그래서 우리는 disk 안에 넣어야한다. disk는 kva에 위치한다.
+	// buffer는 걍 디스크 공간을 가리키는 거라고 생각함... 파일이 있는 곳. 파일이 디스크에 있음. 그래서 kva로 봐야한다.
+	off_t offset = file_read(entry->file, page->frame->kva, entry->offset);
+
+	// 물리 메모리에 적재
+	memset(page->frame->kva + entry->read_bytes, 0, entry->zero_bytes);
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -838,7 +850,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
+		struct vm_entry *aux;
+
+		aux->file = file;
+		aux->offset = ofs;
+		aux->read_bytes = read_bytes;
+		aux->zero_bytes = zero_bytes;
+		
 		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
 					writable, lazy_load_segment, aux))
 			return false;
