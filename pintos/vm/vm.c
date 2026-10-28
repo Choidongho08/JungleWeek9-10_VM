@@ -49,7 +49,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, v
 {
 	ASSERT (VM_TYPE(type) != VM_UNINIT)
 
-	struct supplemental_page_table *spt = &thread_current ()->spt;
+	struct supplemental_page_table *spt = &thread_current()->spt;
 
 	/* Check wheter the upage is already occupied or not. */
 	if (spt_find_page (spt, upage) == NULL) {
@@ -62,18 +62,28 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, v
 		{
 			uninit_new(page, upage, init, type, aux, anon_initializer);
 		}
-		if(type == VM_FILE)
+		else if(type == VM_FILE)
 		{
 			uninit_new(page, upage, init, type, aux, file_backed_initializer);
 		}
+		else
+			goto err;
 		// if문으로 vm_type마다 초기화 함수 선택.
 		
 		/* 페이지 구조체를 만든 뒤에는 해당 프로세스의 보조 페이지 테이블에 삽입하세요. 
 		vm.h의 VM_TYPE 매크로를 사용하면 편리할 수 있습니다.*/
 		
 		/* 할 일: 페이지를 spt에 삽입한다. vm.h의 VM_TYPE 매크로를 사용 */
-		spt_insert_page(&thread_current()->spt.spt_hash, page);
+		if(VM_TYPE(page->uninit.type) != VM_ANON && VM_TYPE(page->uninit.type) != VM_FILE)
+		{
+			if(!spt_insert_page(spt, page))
+			{
+				goto err;
+			}
+		}
 	}
+
+	return true;
 err:
 	return false;
 }
@@ -196,21 +206,24 @@ vm_handle_wp (struct page *page UNUSED) {
 
 /* Return true on success */
 bool
-vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
-		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
-	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
+vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bool not_present) 
+{
+	struct supplemental_page_table *spt = &thread_current ()->spt;
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
 
-	/* 주소 존재하지 않거나, 커널 가상 메모리를 가리키거나, 읽기 전용 페이지에 쓰려는 접근이면 페이지 폴트 */
-	if (not_present || !user || write) {
+	/* 주소 존재하지 않거나, 커널 가상 메모리를 가리키거나, 읽기 전용 페이지에 쓰려는 접근이면 오류*/
+	if (not_present || !user || !write)
+	{
 		return false;
 	}
 	
 	/* 폴트가 발생한 페이지를 SPT에서 찾습니다.*/
 	page = spt_find_page(spt, addr);
-	if (!page) {
+	if (!page) 
+	{
+		PANIC("222222");
 		return false;
 	}
 
@@ -227,11 +240,13 @@ vm_dealloc_page (struct page *page) {
 
 /* Claim the page that allocate on VA. */
 bool
-vm_claim_page (void *va UNUSED) {
+vm_claim_page (void *va) {
 	struct page *page = NULL;
 	/* TODO: Fill this function */
 
-	return vm_do_claim_page (page);
+	page = spt_find_page(&thread_current()->spt, va);
+
+	return vm_do_claim_page(page);
 }
 
 /* Claim the PAGE and set up the mmu. */

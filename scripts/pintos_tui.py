@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""PintOS 테스트와 GDB를 한 터미널에서 열어요. 기본은 Project 2(User Programs)예요.
+"""PintOS 테스트와 GDB를 한 터미널에서 열어요. 기본은 Project 3(Virtual Memory)예요.
 Python 표준 라이브러리만 써요."""
 
 import argparse
+import base64
 import curses
 import locale
 import os
@@ -21,8 +22,11 @@ import unicodedata
 ROOT = Path(__file__).resolve().parents[1]
 PINTOS = ROOT / "pintos"
 LOGS = ROOT / ".tui" / "logs"
+COPY_FILE = ROOT / ".tui" / "copy.txt"
+# 소스 보기에서 빼는 공용 파일이에요. 모든 테스트에 똑같이 붙어서 볼 거리가 없어요.
+COMMON_SOURCES = {"tests/main.c", "tests/lib.c"}
 # 어느 프로젝트 폴더에서 빌드할지는 main()에서 --project 로 정해요.
-PROJECT = PINTOS / "userprog"
+PROJECT = PINTOS / "vm"
 BUILD = PROJECT / "build"
 TITLES = {"threads": "Threads", "userprog": "User Programs", "vm": "Virtual Memory", "filesys": "File Systems"}
 DEFAULT_TIMEOUT = 60        # tests/Make.tests 의 TIMEOUT 기본값과 같아요
@@ -42,7 +46,7 @@ class Test:
 
 
 class Section:
-    """TEST_SUBDIRS 한 칸이 한 묶음이에요. extra는 Make.vars에 주석으로 꺼 둔 추가 과제예요."""
+    """TEST_SUBDIRS 한 칸이 한 묶음이에요. extra는 Make.vars에 주석으로 꺼 두었거나 Grading이 추가 과제라고 적은 묶음이에요."""
 
     def __init__(self, directory, label, short, extra):
         self.directory = directory
@@ -57,15 +61,33 @@ def make_text(path):
     return re.sub(r"\\\n", " ", path.read_text())
 
 
+def graded_extras(project):
+    """Make.vars 의 GRADING_FILE 에서 `# Extra ...` 주석 아래에 적힌 묶음을 모아요.
+    vm은 cow를 TEST_SUBDIRS 에 켜 둔 채로, 추가 과제라는 건 Grading 파일에만 적어 둬요."""
+    files = re.findall(r"^GRADING_FILE\s*=\s*\$\(SRCDIR\)/(\S+)", make_text(project / "Make.vars"), re.M)
+    if not files:
+        return set()
+    extras, in_extra = set(), False
+    for line in read_lines(PINTOS / files[-1]):
+        if line.startswith("#"):
+            in_extra = in_extra or "extra" in line.lower()
+        elif in_extra and line.split():
+            extras.add(str(Path(line.split()[-1]).parent).replace("\\", "/"))
+    return extras
+
+
 def read_subdirs(project):
     """<프로젝트>/Make.vars 의 TEST_SUBDIRS 를 읽어요. make check 가 돌리는 목록이 바로 이거예요.
-    주석으로 꺼 둔 `# TEST_SUBDIRS += ...` 줄은 추가 과제로 따로 모아요."""
+    주석으로 꺼 둔 `# TEST_SUBDIRS += ...` 줄과 Grading 파일이 추가 과제라고 적은 묶음은 따로 모아요."""
     official, extra = [], []
     for line in make_text(project / "Make.vars").splitlines():
         match = re.match(r"\s*(#\s*)?TEST_SUBDIRS\s*\+?=\s*(.*)", line)
         if match:
             words = [word for word in match[2].split() if not word.startswith("$")]
             (extra if match[1] else official).extend(words)
+    graded = graded_extras(project)
+    extra += [directory for directory in official if directory in graded]
+    official = [directory for directory in official if directory not in graded]
     return official, [directory for directory in dict.fromkeys(extra) if directory not in official]
 
 
@@ -118,7 +140,7 @@ def discover(project):
         for name, timeout in sorted(tests, key=lambda item: order[family(Path(item[0]).name)]):
             section.tests.append(Test(name, section, timeout))
         sections.append(section)
-    # 추가 과제 규칙은 Make.vars가 꺼 둬서, 그 테스트를 돌릴 때만 make에 목록을 직접 넘겨줘요.
+    # 추가 과제 규칙은 Make.vars가 꺼 두기도 해서, make에 목록을 직접 넘겨줘요. 이미 켜져 있으면 같은 목록이에요.
     make_vars = ["TEST_SUBDIRS=" + " ".join(every)] if extra else []
     return sections, make_vars
 
@@ -143,6 +165,88 @@ def read_lines(path):
         except OSError:
             time.sleep(0.05 * (attempt + 1))
     return []
+
+
+def make_values(text, name):
+    """Make 파일에서 `이름 = 값` 과 `이름 += 값` 을 순서대로 모아요. 값 안의 공백은 그대로 둬요."""
+    return [match[1].strip() for match in re.finditer(rf"^{re.escape(name)}\s*\+?=(.*)$", text, re.M)]
+
+
+def source_lines(test):
+    """테스트가 실제로 컴파일하는 .c 파일을 보여 줘요. 맨 위에는 make가 넘기는 인자와 디스크에 넣는 파일을 적어요.
+    userprog처럼 `<테스트>_SRC` 가 있으면 그걸 쓰고, threads처럼 한 파일에 테스트 여러 개가 있으면
+    `test_이름 (` 함수가 들어 있는 파일을 찾아요."""
+    text = make_text(PINTOS / test.section.directory / "Make.tests")
+    files = [name for value in make_values(text, test.path + "_SRC") for name in value.split()
+             if name not in COMMON_SOURCES]
+    if not files and (PINTOS / (test.path + ".c")).is_file():
+        files = [test.path + ".c"]
+    if not files:
+        function = re.compile(rf"^test_{re.escape(test.name.replace('-', '_'))}\s*\(", re.M)
+        # mlfqs처럼 목록이 부모 폴더 Make.tests에 있는 경우도 있어서, 테스트 폴더의 .c 파일도 같이 뒤져요.
+        candidates = [name for value in make_values(text, test.section.directory + "_SRC") for name in value.split()]
+        candidates += sorted(str(path.relative_to(PINTOS)) for path in (PINTOS / test.path).parent.glob("*.c"))
+        files = [name for name in candidates if function.search("\n".join(read_lines(PINTOS / name)))][:1]
+    arguments = " ".join(make_values(text, test.path + "_ARGS"))
+    putfiles = " ".join(make_values(text, test.path + "_PUTFILES"))
+    lines = [f"실행 명령: {test.name}" + (f" {arguments}" if arguments else "")]
+    if putfiles:
+        lines.append(f"디스크에 같이 넣는 파일: {putfiles}")
+    if not files:
+        lines += ["", "이 테스트의 소스 파일을 Make.tests에서 찾지 못했어요."]
+    for name in files:
+        lines += ["", f"── {name} ──", *read_lines(PINTOS / name)]
+    return lines
+
+
+def expected_lines(test):
+    """<테스트>.ck 에서 `<<'EOF'` 로 적어 둔 예상 출력만 뽑아요. 한 줄에 여러 개면 그중 하나만 맞으면 PASS예요.
+    정해진 출력 없이 펄 코드로 판정하는 테스트(alarm, mlfqs 등)는 .ck 원본을 그대로 보여 줘요."""
+    lines = read_lines(PINTOS / (test.path + ".ck"))
+    if not lines:
+        return [f"{test.path}.ck 파일이 없어요."]
+    blocks, index = [], 0
+    while index < len(lines):
+        markers = re.findall(r"<<\s*['\"]?([A-Z_][A-Z0-9_]*)['\"]?", lines[index])
+        index += 1
+        for marker in markers:
+            body = []
+            while index < len(lines) and lines[index] != marker:
+                body.append(lines[index])
+                index += 1
+            index += 1
+            blocks.append(body)
+    if not blocks:
+        return ["정해진 출력이 없고 펄 코드로 판정하는 테스트예요. .ck 원본이에요.", ""] + lines
+    whole = "\n".join(lines)
+    notes = []
+    if "IGNORE_EXIT_CODES" in whole:
+        notes.append("(판정할 때 `이름: exit(N)` 줄은 무시해요)")
+    if "IGNORE_USER_FAULTS" in whole:
+        notes.append("(판정할 때 유저 프로그램 page fault 메시지는 무시해요)")
+    result = notes + ([""] if notes else [])
+    for number, body in enumerate(blocks, 1):
+        if len(blocks) > 1:
+            result.append(f"── 허용되는 출력 {number}/{len(blocks)} (이 중 하나와 같으면 PASS) ──")
+        result += body
+        if number < len(blocks):
+            result.append("")
+    return result
+
+
+def copy_text(text):
+    """글자를 .tui/copy.txt 에 저장하고, OSC 52 로 터미널 클립보드에도 보내 봐요.
+    OSC 52 는 터미널이 지원할 때만 클립보드에 들어가고, 지원 여부는 이쪽에서 알 수가 없어요.
+    그래서 파일은 언제나 남겨요. 바인드 마운트라 Windows 쪽에서도 바로 열 수 있어요."""
+    COPY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    COPY_FILE.write_text(text + "\n")
+    sequence = "\033]52;c;" + base64.b64encode(text.encode()).decode() + "\a"
+    if os.environ.get("TMUX"):
+        sequence = "\033Ptmux;" + sequence.replace("\033", "\033\033") + "\033\\"
+    try:
+        os.write(sys.stdout.fileno(), sequence.encode())
+    except OSError:
+        pass
 
 
 def result_of(test):
@@ -471,6 +575,17 @@ def text_width(text):
     return sum(2 if unicodedata.east_asian_width(char) in ("W", "F") else 1 for char in text)
 
 
+def timeout_notes(tests):
+    """도움말 맨 아래 줄들이에요. 프로젝트마다 긴 테스트가 달라서 Make.tests 에서 읽은 값으로 만들어요.
+    vm은 긴 테스트가 많아서 한 줄에 다 쓰면 잘려요. 그래서 시간마다 한 줄씩 써요."""
+    longer = {}
+    for test in tests:
+        if test.timeout != DEFAULT_TIMEOUT:
+            longer.setdefault(test.timeout, []).append(test.name)
+    return ([f"시간 제한은 Make.tests 값 그대로예요. 기본 {DEFAULT_TIMEOUT}초, 나머지는 아래와 같아요."]
+            + [f"  {seconds:>3}초  {', '.join(names)}" for seconds, names in sorted(longer.items())])
+
+
 HELP = [
     "Enter/r  선택한 테스트 실행 (항상 빌드 후 재실행)",
     "g        현재 묶음 전체 실행    a  make check 목록 전체 실행 (추가 과제 빼고)",
@@ -480,7 +595,12 @@ HELP = [
     "o        정렬 바꾸기: 분류순(묶음별) / 결과순(FAIL·ERR 먼저)",
     "         정렬을 바꾸거나 결과가 들어와 줄이 움직여도 고른 테스트는 그대로예요",
     "/        테스트 이름 검색 (Enter 완료, Esc 취소)",
-    "Tab      판정 / QEMU 출력 / 오류 / 실행 로그 / 디버그 로그",
+    "Tab      판정/QEMU 출력/예상 출력/소스/오류/실행 로그/디버그 로그",
+    "         Shift+Tab 은 거꾸로 돌아요",
+    "e        예상 출력(.ck)으로    v  테스트 소스(.c)로 바로 가기",
+    "c        오른쪽 내용 전체 복사 (OSC 52 클립보드 + .tui/copy.txt)",
+    "z        오른쪽만 화면 가득 보기. 드래그하면 출력 글자만 잡혀요",
+    "         z / q / Esc 로 원래 화면으로 돌아와요",
     "PgUp/Dn  오른쪽 로그 스크롤    Home/End  처음/끝",
     "→ / ←    ↑↓(와 휠)이 움직일 쪽을 로그 / 테스트 목록으로 바꾸기",
     "         CLion 터미널은 휠을 ↑↓로 보내서, → 로 로그 쪽에 두면 휠로 로그가 내려가요",
@@ -496,9 +616,11 @@ HELP = [
     "GDB: quit 입력 → QEMU 종료, 테스트 화면으로 복귀",
     "? 도움말 닫기 · q TUI 종료 (진행 중이면 먼저 s)",
     "PASS/FAIL은 마지막 테스트 결과예요. 코드 수정 후 다시 실행하세요.",
-    "시간 제한은 Make.tests 값 그대로예요 (기본 60초, syn-read 300초, multi-oom 600초).",
 ]
 ORDERS = {"section": "분류순", "result": "결과순"}
+# 오른쪽 칸에 보여 줄 수 있는 것들이에요. Tab 은 이 순서로 돌아요.
+VIEWS = (("result", "판정"), ("output", "QEMU 출력"), ("expected", "예상 출력"), ("source", "테스트 소스"),
+         ("errors", "오류"), ("run", "실행 로그"), ("debug", "디버그 QEMU 로그"))
 # 결과순에서 위에서부터 보여 줄 칸이에요. FAIL과 ERR은 둘 다 고쳐야 하는 것이라 한 칸에 모아요.
 BUCKETS = (("RUN", "실행 중"), ("BAD", "FAIL · ERR"), ("--", "미실행"), ("PASS", "PASS"))
 
@@ -517,9 +639,11 @@ class App:
         self.cursor = self.tests[0] if self.tests else None   # 고른 테스트. 줄 번호가 아니라 테스트 자체를 기억해요
         self.index = 0
         self.top = 0                # 왼쪽 목록이 몇 번째 줄부터 보이는지
-        self.view = 0
+        self.view = "result"
         self.offset = None
         self.help = False
+        self.zoom = False           # True면 오른쪽 칸만 화면 가득 그려요
+        self.files = {}             # 소스·예상 출력은 안 바뀌어서 테스트마다 한 번만 읽어요
         self.focus = "tests"        # ↑↓가 움직이는 쪽. "tests" 또는 "log"
         self.debug_pending = None
         self.screen.timeout(100)
@@ -540,9 +664,35 @@ class App:
         except curses.error:
             pass
 
+    def log_rows(self):
+        """오른쪽 칸이 한 번에 보여 주는 줄 수예요. 크게 보기에서는 맨 아래 안내 한 줄만 빼요."""
+        return max(1, self.screen.getmaxyx()[0] - (1 if self.zoom else 7))
+
+    def set_view(self, view):
+        """소스와 예상 출력은 처음부터, 나머지 로그는 끝을 따라가며 보여 줘요."""
+        self.view, self.help = view, False
+        self.offset = 0 if view in ("expected", "source") else None
+
+    def set_zoom(self, on):
+        """크게 보기에서는 마우스를 놓아줘서 드래그로 바로 글자를 고를 수 있게 해요."""
+        self.zoom = on
+        self.set_mouse(self.mouse and not on)
+        self.screen.clear()
+        self.runner.message = ("크게 보기예요. 드래그로 고르거나 c로 전체 복사, z / q / Esc 로 돌아와요."
+                               if on else "원래 화면으로 돌아왔어요.")
+
+    def copy(self):
+        label, lines = self.log_lines()
+        if not lines:
+            self.runner.message = f"{label}에 복사할 내용이 없어요."
+            return
+        copy_text("\n".join(lines))
+        relative = COPY_FILE.relative_to(ROOT)
+        self.runner.message = (f"{label} {len(lines)}줄 복사했어요. 클립보드에 없으면 {relative} 를 여세요.")
+
     def scroll(self, delta):
         """오른쪽 로그를 delta줄 움직여요. 맨 끝까지 내려가면 다시 끝을 따라가요."""
-        rows = max(1, self.screen.getmaxyx()[0] - 7)
+        rows = self.log_rows()
         maximum = max(0, len(self.log_lines()[1]) - rows)
         position = maximum if self.offset is None else min(self.offset, maximum)
         position = max(0, position + delta)
@@ -610,14 +760,21 @@ class App:
     def log_lines(self):
         test = self.selected()
         if self.help:
-            return "도움말", HELP
-        if self.view == 3:
-            return "실행 로그", read_lines(self.runner.log)
-        if self.view == 4:
-            return "디버그 QEMU 로그", read_lines(LOGS / "debug.log")
-        label, suffix = (("판정", ".result"), ("QEMU 출력", ".output"), ("오류", ".errors"))[self.view]
-        lines = read_lines(BUILD / (test.path + suffix)) if test else []
-        return label, lines
+            return "도움말", HELP + timeout_notes(self.tests)
+        label = dict(VIEWS)[self.view]
+        if self.view == "run":
+            return label, read_lines(self.runner.log)
+        if self.view == "debug":
+            return label, read_lines(LOGS / "debug.log")
+        if not test:
+            return label, []
+        if self.view in ("expected", "source"):
+            key = (self.view, test.path)
+            if key not in self.files:
+                self.files[key] = (expected_lines if self.view == "expected" else source_lines)(test)
+            return label, self.files[key]
+        suffix = {"result": ".result", "output": ".output", "errors": ".errors"}[self.view]
+        return label, read_lines(BUILD / (test.path + suffix))
 
     def draw_list(self, left, rows_available):
         rows = self.rows()
@@ -659,8 +816,11 @@ class App:
             self.put(0, 0, "터미널을 80열 × 12줄 이상으로 넓혀 주세요. q로 종료할 수 있어요.")
             self.screen.refresh()
             return
+        if self.zoom:
+            self.draw_zoom(height, width)
+            return
         left = min(44, max(36, width // 3))
-        rows = height - 7
+        rows = self.log_rows()
         statuses = [self.runner.status(test.path) for test in self.official]
         extras = [test for test in self.tests if test.section.extra]
         summary = (f"PintOS · {TITLES.get(self.project, self.project)}   make check {len(statuses)}개: "
@@ -688,8 +848,24 @@ class App:
         arrows = "↑↓ 테스트 선택  → 로그로" if self.focus == "tests" else "↑↓ 로그 스크롤  ← 테스트로"
         self.put(height - 2, 1, arrows + "  Enter 실행  g 묶음  a 전체  f 실패  d 디버그  Tab 로그  s 중단  q 종료")
         groups = "  ".join(f"{number} {section.short}" for number, section in enumerate(self.sections[:8], 2))
-        self.put(height - 1, 1, f"1 전체  {groups}   o 정렬  / 검색  p 병렬  "
+        self.put(height - 1, 1, f"1 전체  {groups}   e 예상  v 소스  c 복사  z 크게  o 정렬  / 검색  p 병렬  "
                  + ("m 마우스 끄기" if self.mouse else "m 마우스 켜기") + "  ? 도움말")
+        self.screen.refresh()
+
+    def draw_zoom(self, height, width):
+        """오른쪽 칸 내용만 왼쪽 끝부터 그려요. 테두리나 목록이 없어서 드래그하면 출력 글자만 잡혀요."""
+        label, lines = self.log_lines()
+        rows = self.log_rows()
+        maximum = max(0, len(lines) - rows)
+        offset = maximum if self.offset is None else min(self.offset, maximum)
+        for row, line in enumerate(lines[offset:offset + rows]):
+            self.put(row, 0, line)
+        test = self.selected()
+        where = f"{offset + 1}-{min(offset + rows, len(lines))}/{len(lines)}줄" if lines else "내용 없음"
+        # 좁은 터미널에서 잘려도 방금 한 일(복사 결과 등)은 보이게 메시지를 안내보다 앞에 둬요.
+        footer = (f"{label} · {test.name if test else '-'} · {where} · {self.runner.message}   "
+                  f"↑↓ PgUp/Dn 스크롤  j/k 테스트  Tab 보기  c 복사  z/q/Esc 돌아가기")
+        self.put(height - 1, 0, footer, curses.A_REVERSE)
         self.screen.refresh()
 
     def search(self):
@@ -736,7 +912,7 @@ class App:
             self.screen.timeout(100)
             self.set_mouse(self.mouse)
         self.runner.message = problem or "디버깅을 마쳤어요. Tab으로 디버그 QEMU 로그를 볼 수 있어요."
-        self.view = 4
+        self.set_view("debug")
         self.offset = None
 
     def run(self):
@@ -749,13 +925,21 @@ class App:
                         self.debug(test)
                 self.draw()
                 key = self.screen.getch()
-                if key == ord("q"):
+                if self.zoom and key in (ord("q"), ord("z"), 27):
+                    self.set_zoom(False)
+                elif key == ord("q"):
                     if not self.runner.busy:
                         return
                     self.runner.message = "실행 중이에요. s로 중단한 뒤 q로 나갈 수 있어요."
+                elif key == ord("z"):
+                    self.set_zoom(True)
+                elif key == ord("c"):
+                    self.copy()
+                elif key in (ord("e"), ord("v")):
+                    self.set_view("expected" if key == ord("e") else "source")
                 elif key in (curses.KEY_RIGHT, curses.KEY_LEFT):
                     self.focus = "log" if key == curses.KEY_RIGHT else "tests"
-                elif key in (curses.KEY_UP, curses.KEY_DOWN) and self.focus == "log":
+                elif key in (curses.KEY_UP, curses.KEY_DOWN) and (self.focus == "log" or self.zoom):
                     self.scroll(-3 if key == curses.KEY_UP else 3)
                 elif key in (ord("["), ord("]")):
                     self.scroll(-3 if key == ord("[") else 3)
@@ -776,12 +960,14 @@ class App:
                                            if self.order == "result" else "분류순: make check 묶음별로, 이름 앞부분이 같은 것끼리 모아요.")
                 elif key == ord("/"):
                     self.search()
-                elif key == 9:
-                    self.view, self.offset, self.help = (self.view + 1) % 5, None, False
+                elif key in (9, curses.KEY_BTAB):
+                    names = [name for name, _ in VIEWS]
+                    step = 1 if key == 9 else -1
+                    self.set_view(names[(names.index(self.view) + step) % len(names)])
                 elif key == ord("?"):
                     self.help, self.offset = not self.help, 0
                 elif key in (curses.KEY_PPAGE, curses.KEY_NPAGE):
-                    rows = max(1, self.screen.getmaxyx()[0] - 7)
+                    rows = self.log_rows()
                     self.scroll(-rows if key == curses.KEY_PPAGE else rows)
                 elif key == curses.KEY_MOUSE:
                     try:
@@ -810,20 +996,20 @@ class App:
                     selected = self.selected()
                     if key in (10, 13, ord("r")) and selected:
                         self.runner.start([selected.path])
-                        self.view, self.offset, self.help = 3, None, False
+                        self.set_view("run")
                     elif key in (ord("g"), ord("a"), ord("f")):
                         tests = self.official if key == ord("a") else self.visible()
                         if key == ord("f"):
                             tests = [test for test in tests if self.runner.status(test.path) in ("FAIL", "ERR")]
                         if tests:
                             self.runner.start([test.path for test in tests])
-                            self.view, self.offset, self.help = 3, None, False
+                            self.set_view("run")
                         else:
                             self.runner.message = "실행할 테스트가 없어요."
                     elif key == ord("d") and selected:
                         self.debug_pending = selected
                         self.runner.start([])
-                        self.view, self.offset, self.help = 3, None, False
+                        self.set_view("run")
         finally:
             self.runner.cancel()
 
@@ -838,8 +1024,8 @@ def configure(project):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project", default="userprog",
-                        help="빌드할 폴더: userprog(기본, Project 2) / threads(Project 1) / vm / filesys")
+    parser.add_argument("--project", default="vm",
+                        help="빌드할 폴더: vm(기본, Project 3) / userprog(Project 2) / threads(Project 1) / filesys")
     parser.add_argument("--list", action="store_true", help="테스트 목록만 출력해요")
     parser.add_argument("--port", type=int, help=argparse.SUPPRESS)
     # --qemu 뒤는 pintos 인자 그대로예요. 중간에 `--`가 있어서 argparse에 맡기면 잘려요. 그래서 직접 잘라요.
@@ -855,7 +1041,7 @@ def main():
     if args.list:
         sections, make_vars = discover(PROJECT)
         for section in sections:
-            tag = "  (추가 과제, make check에는 없어요)" if section.extra else ""
+            tag = "  (추가 과제, a 전체 실행에서는 빠져요)" if section.extra else ""
             print(f"[{section.label}] {len(section.tests)}개{tag}")
             for test in section.tests:
                 print(f"  {test.path}  ({test.timeout}초)")
@@ -865,6 +1051,8 @@ def main():
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         parser.exit(1, "TUI는 터미널이 필요해요. docker exec -it로 실행해 주세요.\n")
     locale.setlocale(locale.LC_ALL, "")
+    # Esc 한 번에 1초씩 기다리지 않게 해요. 크게 보기에서 나오거나 검색을 취소할 때 써요.
+    os.environ.setdefault("ESCDELAY", "25")
     try:
         curses.wrapper(lambda screen: App(screen, args.project).run())
     except KeyboardInterrupt:
