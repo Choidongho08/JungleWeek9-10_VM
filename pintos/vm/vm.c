@@ -260,53 +260,24 @@ bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct s
 	dst->spt_hash.hash = src->spt_hash.hash;
 	dst->spt_hash.less = src->spt_hash.less;
 	dst->spt_hash.aux = src->spt_hash.aux;
-	dst->spt_hash.buckets = malloc(sizeof dst->spt_hash.buckets * dst->spt_hash.bucket_cnt);
-
-
-struct hash_iterator dst_it;
-	struct hash_iterator src_it;
-	struct hash_elem* dst_elem;
-	struct hash_elem* cur_elem;
+	dst->spt_hash.buckets = malloc(sizeof(dst->spt_hash.buckets));
 	
-	// struct list* src_bucket = src->spt_hash.buckets;
-	// for(struct list_elem* src_elem = list_front(src_bucket); src_elem != list_end(src_bucket); src_elem = list_next(src_elem))
-	// {
-	// 	struct list* dst_bucket = malloc(sizeof (struct list));
-	// 	list_init(dst_bucket);
-		
-	// 	for()
-	// }
+	// struct hash {
+	// size_t elem_cnt;            /* Number of elements in table. */
+	// size_t bucket_cnt;          /* Number of buckets, a power of 2. */
+	// struct list *buckets;       /* Array of `bucket_cnt' lists. */
+	// hash_hash_func *hash;       /* Hash function. */
+	// hash_less_func *less;       /* Comparison function. */
+	// void *aux;                  /* Auxiliary data for `hash' and `less'. */
+	// };
 
+	// /* A hash table iterator. */
+	// struct hash_iterator {
+	// struct hash *hash;          /* The hash table. */
+	// struct list *bucket;        /* Current bucket. */
+	// struct hash_elem *elem;     /* Current hash element in current bucket. */
+	// };
 
-
-	hash_first(&src_it, &src->spt_hash); // src의 시작점 저장
-	hash_first(&dst_it, &dst->spt_hash); // dst의 시작점 저장
-	
-	struct list* src_bucket = src->spt_hash.buckets;
-	while (src_elem != NULL) {
-
-		// struct page* page = malloc(sizeof(struct page));
-		// cur_elem = hash_entry(hash_elem, );
-		// hash_insert(&dst->spt_hash, );
-		
-		
-		struct list* dst_bucket = malloc(sizeof (struct list));
-		list_init(dst_bucket);
-
-		// 한 버킷을 처음부터 끝까지 돌음.
-		for(struct list_elem* src_elem = list_front(src_bucket); src_elem != list_end(src_bucket); src_elem = list_next(src_elem))
-		{
-			// dst의 안에 넣어줘요 list push back으로.
-			hash_entry(src_ele1, struct hash_iterator, hash_elem);
-		}
-
-
-		if (list_next(src_elem) == NULL) {
-		 	hash_next(&src_it);	
-			list_elem_to_hash_elem(list_next(&dst->spt_hash.buckets));
-		}
-
-	}
 }
 
 /* Free the resource hold by the supplemental page table */

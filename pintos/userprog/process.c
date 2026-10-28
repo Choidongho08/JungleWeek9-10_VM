@@ -177,7 +177,7 @@ __do_fork (void *aux) {
 
 	/* 1. Read the cpu context to local stack. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
-
+	
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create();
 	if (current->pml4 == NULL)
@@ -869,17 +869,22 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 	return true;
 }
 
-/* Create a PAGE of stack at the USER_STACK. Return true on success. */
+/* USER_STACK에 스택 페이지를 생성합니다. 성공하면 true를 반환합니다. */
 static bool
 setup_stack (struct intr_frame *if_) {
 	bool success = false;
 	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
 
-	/* TODO: Map the stack on stack_bottom and claim the page immediately.
-	 * TODO: If success, set the rsp accordingly.
-	 * TODO: You should mark the page is stack. */
-	/* TODO: Your code goes here */
-
+	/* TODO: stack_bottom에 스택을 매핑하고 페이지를 즉시 할당한다.
+	 * TODO: 성공하면 rsp를 적절히 설정하세요.
+	 * TODO: 페이지에 스택임을 표시해야 합니다. */
+	/* TODO: 여기에 코드를 작성하세요 */
+	success = vm_alloc_page(VM_ANON, stack_bottom, true);
+	
+	if (success) {
+		if_->rsp = stack_bottom;
+	}
+	
 	return success;
 }
 #endif /* VM */
