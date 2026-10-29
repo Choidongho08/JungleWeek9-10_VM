@@ -28,6 +28,7 @@ static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
+static bool duplicate_fd_table (struct thread *parent);
 
 /* General process initializer for initd and other process. */
 static void
@@ -120,13 +121,100 @@ initd (void *initd_aux) {
 	NOT_REACHED ();
 }
 
-/* Clones the current process as `name`. Returns the new process's thread id, or
- * TID_ERROR if the thread cannot be created. */
+/* 자식에서 호출한다. 부모와 같은 FD 번호로 열린 파일 목록을 복제한다. */
+static bool
+duplicate_fd_table (struct thread *parent) {
+	struct thread *current = thread_current();
+	struct list *files = &parent->file_list;
+
+	for (struct list_elem *elem = list_begin(files);
+			elem != list_end(files); elem = list_next(elem)) {
+		struct fd_status *status = list_entry(elem, struct fd_status, elem);
+		struct fd_status *copy = malloc(sizeof(struct fd_status));
+		if (copy == NULL)
+			return false;
+
+		copy->fd = status->fd;
+
+		lock_acquire(&file_lock);
+		copy->file = file_duplicate(status->file);
+		lock_release(&file_lock);
+
+		if (copy->file == NULL) {
+			/* 목록에 등록하기 전의 항목은 여기서 정리한다. */
+			free(copy);
+			return false;
+		}
+
+		/* 등록한 항목은 실패 시 기존 process_exit에서 정리한다. */
+		list_push_back(&current->file_list, &copy->elem);
+	}
+
+	current->last_fd = parent->last_fd;
+	return true;
+}
+
+/* 부모를 복제한 자식을 만들고, 성공하면 자식 TID를 반환한다. */
 tid_t
-process_fork (const char *name, struct intr_frame *if_ UNUSED) {
-	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+process_fork (const char *name, struct intr_frame *if_parent) {
+	struct fork_aux context;
+	struct intr_frame parent_frame;
+	struct child_state *state;
+	tid_t tid;
+
+	if (name == NULL || if_parent == NULL)
+		return TID_ERROR;
+
+	/* 부모가 복제 완료까지 기다리므로 지역 변수는 그동안 유효하다.
+	 * 자식은 완료 통지 후 context에 다시 접근하면 안 된다. */
+	memcpy(&parent_frame, if_parent, sizeof(struct intr_frame));
+	context.parent = thread_current();
+	context.if_ = &parent_frame;
+	context.result = false;
+	sema_init(&context.parent_wait_sema, 0);
+
+	state = malloc(sizeof(struct child_state));
+	if (state == NULL)
+		return TID_ERROR;
+
+	/* 자식이 실행되기 전에 공유 상태를 초기화한다. */
+	state->tid = TID_ERROR;
+	state->exit_val = -1;
+	state->refer_cnt = 2;
+	state->waited = false;
+	lock_init(&state->refer_cnt_protect_lock);
+	sema_init(&state->wait_sema, 0);
+	context.state = state;
+
+	tid = thread_create(name, PRI_DEFAULT, __do_fork, &context);
+	if (tid == TID_ERROR) {
+		/* 자식이 생성되지 않았으므로 여기서 직접 해제한다. */
+		free(state);
+		return TID_ERROR;
+	}
+	state->tid = tid;
+
+	/* 자식은 복제 성공과 실패 모두 결과를 기록한 뒤 통지한다. */
+	sema_down(&context.parent_wait_sema);
+
+	if (context.result) {
+		list_push_back(&thread_current()->child_state_list, &state->elem);
+		return tid;
+	}
+
+	/* 실패한 자식은 부모 목록에 등록하지 않는다.
+	 * 부모 참조만 해제하고 자식 참조는 process_exit에서 해제한다. */
+	lock_acquire(&state->refer_cnt_protect_lock);
+	state->refer_cnt--;
+	if (state->refer_cnt == 0) {
+		lock_release(&state->refer_cnt_protect_lock);
+		free(state);
+	}
+	else {
+		lock_release(&state->refer_cnt_protect_lock);
+	}
+
+	return TID_ERROR;
 }
 
 #ifndef VM
@@ -139,23 +227,32 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	void *parent_page;
 	void *newpage;
 	bool writable;
-
+	
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
+	if (is_kernel_vaddr(va))
+		return true;
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
+	newpage = palloc_get_page (PAL_USER);
+	if (newpage == NULL)
+		return false;
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
+	memcpy (newpage, parent_page, PGSIZE);
+	writable = is_writable (pte);
 
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: if fail to insert page, do error handling. */
+		palloc_free_page (newpage);
+		return false;
 	}
 	return true;
 }
@@ -167,44 +264,51 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
  *       this function. */
 static void
 __do_fork (void *aux) {
+	struct fork_aux *context = aux;
+	struct thread *parent = context->parent;
+	struct thread *current = thread_current();
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
-	struct thread *current = thread_current ();
-	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
-	bool succ = true;
 
-	/* 1. Read the cpu context to local stack. */
-	memcpy (&if_, parent_if, sizeof (struct intr_frame));
+	/* 실패하더라도 기존 process_exit이 자식 자원과 참조를 정리하게 한다. */
+	current->share_parent = context->state;
+	memcpy(&if_, context->if_, sizeof(struct intr_frame));
 
-	/* 2. Duplicate PT */
+	/* 메모리 복제는 기존 연결을 유지한다. duplicate_pte는 메모리 담당 영역이다. */
 	current->pml4 = pml4_create();
-	if (current->pml4 == NULL)
+	if(current->pml4 == NULL){
 		goto error;
-
-	process_activate (current);
+	}
+	process_activate(current);
 #ifdef VM
-	supplemental_page_table_init (&current->spt);
-	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
+	supplemental_page_table_init(&current->spt);
+	if(!supplemental_page_table_copy(&current->spt, &parent->spt)){
 		goto error;
+	}
 #else
-	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
+	if(!pml4_for_each(parent->pml4, duplicate_pte, parent)){
 		goto error;
+	}
 #endif
 
-	/* TODO: Your code goes here.
-	 * TODO: Hint) To duplicate the file object, use `file_duplicate`
-	 * TODO:       in include/filesys/file.h. Note that parent should not return
-	 * TODO:       from the fork() until this function successfully duplicates
-	 * TODO:       the resources of parent.*/
+	if(!duplicate_fd_table(parent)){
+		goto error;
+	}
+	process_init();
 
-	process_init ();
+	/* 자식은 같은 fork 호출에서 0을 반환한 것처럼 사용자 코드로 돌아간다. */
+	if_.R.rax = 0;
+	context->result = true;
+	sema_up(&context->parent_wait_sema);
 
-	/* Finally, switch to the newly created process. */
-	if (succ)
-		do_iret (&if_);
+	/* 통지 이후에는 부모의 지역 변수인 context에 다시 접근하지 않는다. */
+	do_iret(&if_);
+	NOT_REACHED();
+
 error:
-	thread_exit ();
+	context->result = false;
+	sema_up(&context->parent_wait_sema);
+	/* 이미 등록된 파일과 페이지, 자식 참조는 기존 종료 경로에서 회수한다. */
+	thread_exit();
 }
 
 /* Switch the current execution context to the f_name.

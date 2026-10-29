@@ -24,10 +24,6 @@ vm_anon_init (void) {
 	swap_disk = NULL;
 	
 	/* page 단위로 disk의 스왑영역에 위치하게 된다. */
-	/* anon_initializer를 호출해야하나? 싶지만 
-	 * uninit_new(new_page, upage, init, type, aux, anon_initializer);
-	 * 여기서 선언이 되어있어서 알아서 사용할 것 같다.
-	 * 그러면 여기에선 무엇을 초기화해야하는가? */
 
 	
 }

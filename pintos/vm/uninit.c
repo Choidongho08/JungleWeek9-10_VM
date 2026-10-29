@@ -52,17 +52,7 @@ uninit_initialize (struct page *page, void *kva) {
 	void *aux = uninit->aux;
 
 	/* TODO: You may need to fix this function. */
-	/* uninit->page_initializer (page, uninit->type, kva) 
-	 지연 로딩을 안하고 바로 띄워야 하는 경우? load
-	 * page_initializer는 anon_initializer을 불러온다. 
-	 * anon_initializer는 현재 빈 구조체인 `anon_page`에 필요한 정보를 추가하거나 갱신하는 함수이다.
-	 * anon_initializer를 호출하고 기본적인 초기화 갱신이 정상적으로 완료되면 true.
-	 * 
-	 * init 함수가 존재하면 추가 초기화 함수 (init)을 실행. -> lazy_load_segment임.
-	 * init 함수가 존재하지 않는다면 init 미실행. 
-		//  &page->uninit->aux;에 aux정보를 저장해야됨.
-	 * 
-	*/
+	
 	return uninit->page_initializer (page, uninit->type, kva) &&
 		(init ? init (page, aux) : true);
 }
