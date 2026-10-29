@@ -6,6 +6,7 @@
 #include "string.h"
 #include "list.h"
 #include "threads/mmu.h"
+#include "threads/vaddr.h"
 
 static struct list frame_table;
 
@@ -60,17 +61,20 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, v
 		 * TODO: uninit_new를 호출하여 'uninit' 페이지 구조체를 생성하십시오. 
 		 * TODO: uninit_new를 호출한 후에 해당 필드를 수정해야 합니다. */
 		struct page* new_page = malloc(sizeof (struct page));
-		if(VM_TYPE(VM_ANON))
+
+		if(VM_TYPE(type) == VM_ANON)
 		{
 			uninit_new(new_page, upage, init, type, aux, anon_initializer);
 		}
-		if(VM_TYPE(VM_FILE))
+		else if(VM_TYPE(type) == VM_FILE)
 		{
 			uninit_new(new_page, upage, init, type, aux, file_backed_initializer);
 		}
 
 		/* TODO: 페이지를 spt(보조 페이지 테이블)에 삽입하십시오. */
-		hash_insert(&spt->spt_hash, &new_page->spt_hash_elem);
+		spt_insert_page(spt, new_page);
+
+		new_page->writable = writable;
 		return true;
 	}
 err:
@@ -82,26 +86,19 @@ struct page *
 spt_find_page (struct supplemental_page_table *spt, void *va) 
 {
 	struct page *result = NULL;
+	result = malloc(sizeof(struct page)); 
 	/* TODO: Fill this function. */
 
-	// pg_round_down(va); // va의 값이 가상 주소의 시작점을 의미하겠다는 보장이 없다. 그러니 pg_round_down을 통해 시작점으로 맞춰준다.
+	result->va = pg_round_down(va); // va의 값이 가상 주소의 시작점을 의미하겠다는 보장이 없다. 그러니 pg_round_down을 통해 시작점으로 맞춰준다.
 
-	// for문 돌면서 va와 같은 va를 갖고있는 page 찾으면 될 거 같아요 (없으면 NULL)
-	struct hash_iterator it;
-	struct hash_elem* elem;
-	hash_first(&it, &spt->spt_hash);
+	struct hash_elem *e;
 
-	// it에 첫번째 elem은 head 값이 들어있다. Head의 다음 값부터 시작하도록 설정한다.
-	for(elem = hash_next(&it); elem != NULL; elem = hash_next(&it))
-	{
-		struct page* page = hash_entry(elem, struct page, spt_hash_elem);
-		if(page->va == va)
-		{
-			result = page;
-		}
+	e = hash_find(&spt->spt_hash, &result->spt_hash_elem);
+	if (!e) {
+		return NULL;
 	}
 
-	return result;
+	return hash_entry(e, struct page, spt_hash_elem);
 }
 
 /* Insert PAGE into spt with validation. */
@@ -148,7 +145,7 @@ vm_evict_frame (void) {
 	}
 	/* TODO: swap out the victim and return the evicted frame. */
 
-	list_remove(victim->elem);
+	list_remove(&victim->elem);
 	if(page_get_type(victim->page) == VM_ANON)
 	{
 		swap_out(victim->page);
@@ -168,18 +165,19 @@ vm_evict_frame (void) {
  * 즉, 사용자 풀 메모리가 가득 찼을 경우, 이 함수는 사용 가능한 메모리 공간을 확보하기 위해 프레임을 제거합니다
  *공간.*/
 static struct frame* vm_get_frame (void) {
-	struct frame *frame = NULL;
+	struct frame *frame = malloc(sizeof(struct frame));
+
+	if (!frame) {
+		return NULL;
+	}
+
 	/* TODO: Fill this function. */
-	void* kva = palloc_get_page(PAL_USER);
-	if(!kva)
+	frame->kva = palloc_get_page(PAL_USER);
+	if(!frame->kva)
 	{
 		frame = vm_evict_frame(); // kva가 할당되지 않았다는 건 유저프로그램에 꽉 찼다는 뜻이니, 하나를 내쫓고 프레임을 할당한다.
 	}
-	else
-	{
-		frame = malloc(sizeof(struct frame));
-	}
-	frame->kva = kva;
+
 	frame->page = NULL;
 
 	ASSERT (frame != NULL);
@@ -201,16 +199,16 @@ vm_handle_wp (struct page *page UNUSED) {
 bool
 vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bool not_present) 
 {
-	struct supplemental_page_table *spt = &thread_current ()->spt;
+	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
 
-	/* 커녈 영역에 있진 않는지, 쓰기 가능한지, 존재하는지 확인 */
-	if(!user || !write || not_present)
-	{
-		return false;
-	}
+	// /* 커널 영역에 있진 않는지, 쓰기 가능한지, 존재하는지 확인 */
+	// if(!user || !write || not_present)
+	// {
+	// 	return false;
+	// }
 
 	/* 오류가 난 주소가 SPT에 저장 되어 있는지 확인 */
 	page = spt_find_page(spt, addr);
@@ -254,9 +252,13 @@ static bool vm_do_claim_page (struct page *page)
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
-
+	
+	if (!pml4_set_page(thread_current() -> pml4, page->va, frame->kva, page->writable)) {
+		vm_dealloc_page(page); // page를 물리 메모리와 가상 공간에서 전부 지운다.
+		return false;
+	}
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
-	list_push_back(&frame_table, frame->elem);
+	// list_push_back(&frame_table, &frame->elem);
 
 	return swap_in (page, frame->kva); // 여기서 vm_alloc_page_with_initializer 때 넣었던 vm_type따라서 init실행 및 설정됨
 }

@@ -52,6 +52,7 @@ anon_initializer (struct page *page, enum vm_type type, void *kva) {
 
 	// 페이지를 특정 페이지 객체(anon, file, page_cache)로 변환합니다.
 	struct anon_page *anon_page = &page->anon;
+	return true;
 }
 
 /* Swap in the page by read contents from the swap disk. */
