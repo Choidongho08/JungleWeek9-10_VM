@@ -28,6 +28,7 @@ static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
+static bool duplicate_fd_table (struct thread *parent);
 
 /* General process initializer for initd and other process. */
 static void
@@ -120,13 +121,100 @@ initd (void *initd_aux) {
 	NOT_REACHED ();
 }
 
-/* Clones the current process as `name`. Returns the new process's thread id, or
- * TID_ERROR if the thread cannot be created. */
+/* 자식에서 호출한다. 부모와 같은 FD 번호로 열린 파일 목록을 복제한다. */
+static bool
+duplicate_fd_table (struct thread *parent) {
+	struct thread *current = thread_current();
+	struct list *files = &parent->file_list;
+
+	for (struct list_elem *elem = list_begin(files);
+			elem != list_end(files); elem = list_next(elem)) {
+		struct fd_status *status = list_entry(elem, struct fd_status, elem);
+		struct fd_status *copy = malloc(sizeof(struct fd_status));
+		if (copy == NULL)
+			return false;
+
+		copy->fd = status->fd;
+
+		lock_acquire(&file_lock);
+		copy->file = file_duplicate(status->file);
+		lock_release(&file_lock);
+
+		if (copy->file == NULL) {
+			/* 목록에 등록하기 전의 항목은 여기서 정리한다. */
+			free(copy);
+			return false;
+		}
+
+		/* 등록한 항목은 실패 시 기존 process_exit에서 정리한다. */
+		list_push_back(&current->file_list, &copy->elem);
+	}
+
+	current->last_fd = parent->last_fd;
+	return true;
+}
+
+/* 부모를 복제한 자식을 만들고, 성공하면 자식 TID를 반환한다. */
 tid_t
-process_fork (const char *name, struct intr_frame *if_ UNUSED) {
-	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+process_fork (const char *name, struct intr_frame *if_parent) {
+	struct fork_aux context;
+	struct intr_frame parent_frame;
+	struct child_state *state;
+	tid_t tid;
+
+	if (name == NULL || if_parent == NULL)
+		return TID_ERROR;
+
+	/* 부모가 복제 완료까지 기다리므로 지역 변수는 그동안 유효하다.
+	 * 자식은 완료 통지 후 context에 다시 접근하면 안 된다. */
+	memcpy(&parent_frame, if_parent, sizeof(struct intr_frame));
+	context.parent = thread_current();
+	context.if_ = &parent_frame;
+	context.result = false;
+	sema_init(&context.parent_wait_sema, 0);
+
+	state = malloc(sizeof(struct child_state));
+	if (state == NULL)
+		return TID_ERROR;
+
+	/* 자식이 실행되기 전에 공유 상태를 초기화한다. */
+	state->tid = TID_ERROR;
+	state->exit_val = -1;
+	state->refer_cnt = 2;
+	state->waited = false;
+	lock_init(&state->refer_cnt_protect_lock);
+	sema_init(&state->wait_sema, 0);
+	context.state = state;
+
+	tid = thread_create(name, PRI_DEFAULT, __do_fork, &context);
+	if (tid == TID_ERROR) {
+		/* 자식이 생성되지 않았으므로 여기서 직접 해제한다. */
+		free(state);
+		return TID_ERROR;
+	}
+	state->tid = tid;
+
+	/* 자식은 복제 성공과 실패 모두 결과를 기록한 뒤 통지한다. */
+	sema_down(&context.parent_wait_sema);
+
+	if (context.result) {
+		list_push_back(&thread_current()->child_state_list, &state->elem);
+		return tid;
+	}
+
+	/* 실패한 자식은 부모 목록에 등록하지 않는다.
+	 * 부모 참조만 해제하고 자식 참조는 process_exit에서 해제한다. */
+	lock_acquire(&state->refer_cnt_protect_lock);
+	state->refer_cnt--;
+	if (state->refer_cnt == 0) {
+		lock_release(&state->refer_cnt_protect_lock);
+		free(state);
+	}
+	else {
+		lock_release(&state->refer_cnt_protect_lock);
+	}
+
+	return TID_ERROR;
 }
 
 #ifndef VM
@@ -139,23 +227,32 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	void *parent_page;
 	void *newpage;
 	bool writable;
-
+	
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
+	if (is_kernel_vaddr(va))
+		return true;
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
+	newpage = palloc_get_page (PAL_USER);
+	if (newpage == NULL)
+		return false;
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
+	memcpy (newpage, parent_page, PGSIZE);
+	writable = is_writable (pte);
 
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: if fail to insert page, do error handling. */
+		palloc_free_page (newpage);
+		return false;
 	}
 	return true;
 }
@@ -167,44 +264,51 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
  *       this function. */
 static void
 __do_fork (void *aux) {
+	struct fork_aux *context = aux;
+	struct thread *parent = context->parent;
+	struct thread *current = thread_current();
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
-	struct thread *current = thread_current ();
-	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
-	bool succ = true;
 
-	/* 1. Read the cpu context to local stack. */
-	memcpy (&if_, parent_if, sizeof (struct intr_frame));
+	/* 실패하더라도 기존 process_exit이 자식 자원과 참조를 정리하게 한다. */
+	current->share_parent = context->state;
+	memcpy(&if_, context->if_, sizeof(struct intr_frame));
 
-	/* 2. Duplicate PT */
+	/* 메모리 복제는 기존 연결을 유지한다. duplicate_pte는 메모리 담당 영역이다. */
 	current->pml4 = pml4_create();
-	if (current->pml4 == NULL)
+	if(current->pml4 == NULL){
 		goto error;
-
-	process_activate (current);
+	}
+	process_activate(current);
 #ifdef VM
-	supplemental_page_table_init (&current->spt);
-	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
+	supplemental_page_table_init(&current->spt);
+	if(!supplemental_page_table_copy(&current->spt, &parent->spt)){
 		goto error;
+	}
 #else
-	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
+	if(!pml4_for_each(parent->pml4, duplicate_pte, parent)){
 		goto error;
+	}
 #endif
 
-	/* TODO: Your code goes here.
-	 * TODO: Hint) To duplicate the file object, use `file_duplicate`
-	 * TODO:       in include/filesys/file.h. Note that parent should not return
-	 * TODO:       from the fork() until this function successfully duplicates
-	 * TODO:       the resources of parent.*/
+	if(!duplicate_fd_table(parent)){
+		goto error;
+	}
+	process_init();
 
-	process_init ();
+	/* 자식은 같은 fork 호출에서 0을 반환한 것처럼 사용자 코드로 돌아간다. */
+	if_.R.rax = 0;
+	context->result = true;
+	sema_up(&context->parent_wait_sema);
 
-	/* Finally, switch to the newly created process. */
-	if (succ)
-		do_iret (&if_);
+	/* 통지 이후에는 부모의 지역 변수인 context에 다시 접근하지 않는다. */
+	do_iret(&if_);
+	NOT_REACHED();
+
 error:
-	thread_exit ();
+	context->result = false;
+	sema_up(&context->parent_wait_sema);
+	/* 이미 등록된 파일과 페이지, 자식 참조는 기존 종료 경로에서 회수한다. */
+	thread_exit();
 }
 
 /* Switch the current execution context to the f_name.
@@ -387,6 +491,15 @@ process_cleanup (void) {
 		curr->pml4 = NULL;
 		pml4_activate (NULL);
 		pml4_destroy (pml4);
+	}
+
+	/* SPT 정리 후 실행 파일을 닫는다. */
+	if (curr->exec_file != NULL) {
+		lock_acquire(&file_lock);
+		file_close(curr->exec_file);
+		lock_release(&file_lock);
+
+		curr->exec_file = NULL;
 	}
 }
 
@@ -645,13 +758,19 @@ load (const char *file_name, struct intr_frame *if_) {
 	success = true;
 
 done:
-	/* We arrive here whether the load is successful or not. */
-	lock_acquire(&file_lock);
-	file_close (file);
-	lock_release(&file_lock);
-	return success;
-}
+    lock_acquire(&file_lock);
 
+    if (success) {
+        /* 이후 지연 로딩에서 사용할 파일을 유지한다. */
+        file_deny_write(file);
+        t->exec_file = file;
+    } else {
+        file_close(file);
+    }
+
+    lock_release(&file_lock);
+    return success;
+}
 
 /* Checks whether PHDR describes a valid, loadable segment in
  * FILE and returns true if so, false otherwise. */
@@ -802,10 +921,27 @@ install_page (void *upage, void *kpage, bool writable) {
  * upper block. */
 
 static bool
-lazy_load_segment (struct page *page, void *aux) {
-	/* TODO: Load the segment from the file */
-	/* TODO: This called when the first page fault occurs on address VA. */
-	/* TODO: VA is available when calling this function. */
+lazy_load_segment (struct page *page, void *aux) 
+{
+	/* TODO: 파일에서 세그먼트를 불러오기 */
+	/* TODO: 첫 번째 페이지 폴트가 VA 주소에서 발생할 때 호출됩니다. */
+	/* TODO: 이 함수를 호출할 때 VA가 사용 가능합니다. */
+
+	// aux에는 vm_entry값이 온다. 이 값을 이해 세그먼트를 읽을 파일을 찾고 메모리에 세그먼트를 불러와야한다.
+	struct vm_entry *entry = (struct vm_entry*) aux;
+
+	// 오프셋을 통해서 디스크에서 메모리 위치를 찾아.
+	// 오프셋을 먼저 맞추고 읽어라.
+	file_seek(entry->file, entry->offset);
+
+	// buffer는 적재될 곳이다. 그래서 우리는 disk 안에 넣어야한다. disk는 kva에 위치한다.
+	// buffer는 걍 디스크 공간을 가리키는 거라고 생각함... 파일이 있는 곳. 파일이 디스크에 있음. 그래서 kva로 봐야한다. 
+	off_t off = file_read(entry->file, page->frame->kva, entry->read_bytes); 
+	
+	// 물리 메모리에 적재를 해.
+	memset(page->frame->kva + entry->read_bytes, 0, entry->zero_bytes);
+
+	return true;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -823,8 +959,8 @@ lazy_load_segment (struct page *page, void *aux) {
  * Return true if successful, false if a memory allocation error
  * or disk read error occurs. */
 static bool
-load_segment (struct file *file, off_t ofs, uint8_t *upage,
-		uint32_t read_bytes, uint32_t zero_bytes, bool writable) {
+load_segment (struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
+{
 	ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
 	ASSERT (pg_ofs (upage) == 0);
 	ASSERT (ofs % PGSIZE == 0);
@@ -837,15 +973,21 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
-		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
-					writable, lazy_load_segment, aux))
+		struct vm_entry *aux = malloc(sizeof(struct vm_entry));
+		aux->file = file;
+		aux->offset = ofs;
+		aux->read_bytes = page_read_bytes;
+		aux->zero_bytes = page_zero_bytes;
+
+		if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable, lazy_load_segment, aux))
 			return false;
 
 		/* Advance. */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
-		upage += PGSIZE;
+		ofs += page_read_bytes;
+
+		upage += PGSIZE; 
 	}
 	return true;
 }
@@ -856,11 +998,18 @@ setup_stack (struct intr_frame *if_) {
 	bool success = false;
 	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
 
-	/* TODO: Map the stack on stack_bottom and claim the page immediately.
-	 * TODO: If success, set the rsp accordingly.
-	 * TODO: You should mark the page is stack. */
-	/* TODO: Your code goes here */
+	/* TODO: stack_bottom에 스택을 매핑하고 페이지를 즉시 할당한다.
+	 * TODO: 성공하면 rsp를 적절히 설정하세요.
+	 * TODO: 페이지에 스택임을 표시해야 합니다. */
 
+	if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, true))
+	{
+		if(vm_claim_page(stack_bottom))
+		{
+			if_->rsp = USER_STACK;
+			success = true;
+		}
+	}
 	return success;
 }
 #endif /* VM */

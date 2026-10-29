@@ -139,6 +139,7 @@ struct thread {
 	
 	struct child_state* share_parent;
 	struct list child_state_list;
+	struct file *exec_file;
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */

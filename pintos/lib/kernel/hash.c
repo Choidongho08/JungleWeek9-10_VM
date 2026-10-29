@@ -26,7 +26,7 @@ hash_init (struct hash *h,
 		hash_hash_func *hash, hash_less_func *less, void *aux) {
 	h->elem_cnt = 0;
 	h->bucket_cnt = 4;
-	h->buckets = malloc (sizeof *h->buckets * h->bucket_cnt);
+	h->buckets = malloc(sizeof *h->buckets * h->bucket_cnt);
 	h->hash = hash;
 	h->less = less;
 	h->aux = aux;
@@ -203,16 +203,16 @@ struct hash_elem *
 hash_next (struct hash_iterator *i) {
 	ASSERT (i != NULL);
 
-	i->elem = list_elem_to_hash_elem (list_next (&i->elem->list_elem));
-	while (i->elem == list_elem_to_hash_elem (list_end (i->bucket))) {
-		if (++i->bucket >= i->hash->buckets + i->hash->bucket_cnt) {
-			i->elem = NULL;
+	i->elem = list_elem_to_hash_elem (list_next (&i->elem->list_elem)); // 현재 bucket의 다음 elem
+	while (i->elem == list_elem_to_hash_elem (list_end (i->bucket))) { // 마지막 elem이면
+		if (++i->bucket >= i->hash->buckets + i->hash->bucket_cnt) { // 마지막 bucket이면
+			i->elem = NULL; // NULL
 			break;
 		}
-		i->elem = list_elem_to_hash_elem (list_begin (i->bucket));
+		i->elem = list_elem_to_hash_elem (list_begin (i->bucket)); // 마지막 bucket이 아니면 다음 bucket의 첫 elem.
 	}
 
-	return i->elem;
+	return i->elem; // 마지막 elem이 아니면 현재 bucket의 다음 elem.
 }
 
 /* Returns the current element in the hash table iteration, or a
