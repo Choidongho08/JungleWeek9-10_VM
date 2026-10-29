@@ -56,7 +56,6 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, v
 	struct supplemental_page_table *spt = &thread_current ()->spt;
 
 	/* Check wheter the upage is already occupied or not. */
-	// 새 페이지가 spt에 존재하지않으면
 	if (spt_find_page (spt, upage) == NULL) {
 		/* TODO: 페이지를 생성하고, VM 유형에 따라 초기화자(initializer)를 가져온 뒤,
 		 * TODO: uninit_new를 호출하여 'uninit' 페이지 구조체를 생성하십시오. 
@@ -202,36 +201,8 @@ vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bo
 {
 	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
 	struct page *page = NULL;
-	struct vm_types *type = page_get_type(page);
-	struct frame *frame;
-	
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-	
-	// 1. 폴트가 발생한 페이지를 보조 페이지 테이블에서 찾습니다
-	//  유효한 메모리 참조라면 해당 항목을 사용하여 페이지에 들어갈 데이터가 어디에 있는지 찾습니다. 
-	// 	데이터는 파일 시스템이나 스왑 슬롯에 있을 수 있고, 단순히 0으로 채워야 하는 페이지일 수도 있습니다
-	//	해당 주소에 데이터가 존재할 이유가 없거나, 커널 가상 메모리를 가리키거나, 
-	//	읽기 전용 페이지에 쓰려는 접근이라면 잘못된 접근입니다.
-	// 	잘못된 접근은 프로세스를 종료하고 모든 자원을 해제해야 합니다.
-	page = spt_find_page(spt, addr);
-	
-	if (page == NULL)
-		return false;
-	
-	if (not_present || !user || write)
-		return false;
-	
-	// 2. 페이지를 저장할 프레임을 확보합니다. 
-	// 	공유를 구현했다면 필요한 데이터가 이미 프레임에 있을 수 있으므로 해당 프레임을 찾을 수 있어야 합니다
-	frame = vm_get_frame();
-
-	// 3. 파일 시스템이나 스왑에서 데이터를 읽거나 0으로 채우는 등의 방법으로 프레임에 내용을 준비합니다. 
-	// 	공유를 구현했고 필요한 페이지가 이미 프레임에 있다면 이 단계에서 할 일이 없을 수도 있습니다.
-	palloc_get_page(PAL_USER);
-
-	// 4. 폴트가 발생한 가상 주소의 페이지 테이블 항목이 해당 물리 페이지를 가리키도록 설정합니다. 
-	// 	threads/mmu.c의 함수를 사용할 수 있습니다.
 
 	// /* 커널 영역에 있진 않는지, 쓰기 가능한지, 존재하는지 확인 */
 	// if(!user || !write || not_present)
