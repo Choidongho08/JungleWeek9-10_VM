@@ -253,7 +253,7 @@ static bool vm_do_claim_page (struct page *page)
 	frame->page = page;
 	page->frame = frame;
 	
-	if (!pml4_set_page(thread_current() -> pml4, page->va, frame->kva, page->writable)) {
+	if (!pml4_set_page(thread_current()-> pml4, page->va, frame->kva, page->writable)) {
 		vm_dealloc_page(page); // page를 물리 메모리와 가상 공간에서 전부 지운다.
 		return false;
 	}
@@ -286,11 +286,70 @@ void supplemental_page_table_init (struct supplemental_page_table *spt UNUSED)
 /* Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct supplemental_page_table *src) 
 {
+	struct hash_iterator* it = malloc(sizeof(struct hash_iterator));
+	hash_first(it, &src->spt_hash);
+	for(struct hash_elem* elem = it->elem; elem != NULL; elem = hash_next(it))
+	{
+		struct page* src_page = hash_entry(elem, struct page, spt_hash_elem);
+		struct page* page = NULL;
+		if(VM_TYPE(src_page->operations->type) == VM_ANON)
+		{
+			if(!vm_alloc_page(VM_ANON, src_page->va, src_page->writable))
+			{
+				return false;
+			}
+			page = spt_find_page(dst, src_page->va);
+			if(!page)
+			{
+				return false;
+			}
+			vm_do_claim_page(page);
+			memcpy(page->frame->kva, src_page->frame->kva, PGSIZE);
+		}
+		else if(VM_TYPE(src_page->operations->type) == VM_FILE)
+		{
+			if(!vm_alloc_page(VM_FILE, src_page->va, src_page->writable))
+			{
+				return false;
+			}
+			page = spt_find_page(dst, src_page->va);
+			if(!page)
+			{
+				return false;
+			}
+			vm_do_claim_page(page);
+			memcpy(page->frame->kva, src_page->frame->kva, PGSIZE);
+		}
+		else
+		{
+			if(!vm_alloc_page(VM_UNINIT, src_page->va, src_page->writable))
+			{
+				return false;
+			}
+			page = spt_find_page(dst, src_page->va);
+			if(!page)
+			{
+				return false;
+			}
+			page->uninit.init = src_page->uninit.init;
+			page->uninit.type = src_page->uninit.type;
+			memcpy(page->uninit.aux, src_page->uninit.aux, sizeof(struct vm_entry));
+			page->uninit.page_initializer = src_page->uninit.page_initializer;
+		}
+	}
 }
 
 /* Free the resource hold by the supplemental page table */
-void supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED)
+void supplemental_page_table_kill (struct supplemental_page_table *spt)
 {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
+	
+	struct hash_iterator* it = malloc(sizeof(struct hash_iterator));
+	hash_first(it, &spt->spt_hash);
+	for(struct hash_elem* elem = it->elem; elem != NULL; elem = hash_next(it))
+	{
+		struct page* p = hash_entry(elem, struct page, spt_hash_elem);
+		destroy(p);
+	}
 }
