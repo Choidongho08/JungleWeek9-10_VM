@@ -23,6 +23,7 @@
 #ifdef VM
 #include "vm/vm.h"
 #endif
+#define VM
 
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
@@ -921,27 +922,22 @@ install_page (void *upage, void *kpage, bool writable) {
  * upper block. */
 
 static bool
-lazy_load_segment (struct page *page, void *aux) 
-{
-	/* TODO: 파일에서 세그먼트를 불러오기 */
-	/* TODO: 첫 번째 페이지 폴트가 VA 주소에서 발생할 때 호출됩니다. */
-	/* TODO: 이 함수를 호출할 때 VA가 사용 가능합니다. */
-
-	// aux에는 vm_entry값이 온다. 이 값을 이해 세그먼트를 읽을 파일을 찾고 메모리에 세그먼트를 불러와야한다.
-	struct vm_entry *entry = (struct vm_entry*) aux;
+lazy_load_segment (struct page *page, void *aux) {
+	/* TODO: Load the segment from the file */
+	/* TODO: This called when the first page fault occurs on address VA. */
+	/* TODO: VA is available when calling this function. */
+	struct vm_entry *entry = (struct vm_entry *) aux;
 
 	// 오프셋을 통해서 디스크에서 메모리 위치를 찾아.
 	// 오프셋을 먼저 맞추고 읽어라.
 	file_seek(entry->file, entry->offset);
 
 	// buffer는 적재될 곳이다. 그래서 우리는 disk 안에 넣어야한다. disk는 kva에 위치한다.
-	// buffer는 걍 디스크 공간을 가리키는 거라고 생각함... 파일이 있는 곳. 파일이 디스크에 있음. 그래서 kva로 봐야한다. 
-	off_t off = file_read(entry->file, page->frame->kva, entry->read_bytes); 
-	
-	// 물리 메모리에 적재를 해.
-	memset(page->frame->kva + entry->read_bytes, 0, entry->zero_bytes);
+	// buffer는 걍 디스크 공간을 가리키는 거라고 생각함... 파일이 있는 곳. 파일이 디스크에 있음. 그래서 kva로 봐야한다.
+	off_t offset = file_read(entry->file, page->frame->kva, entry->offset);
 
-	return true;
+	// 물리 메모리에 적재
+	memset(page->frame->kva + entry->read_bytes, 0, entry->zero_bytes);
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -992,7 +988,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes,
 	return true;
 }
 
-/* Create a PAGE of stack at the USER_STACK. Return true on success. */
+/* USER_STACK에 스택 페이지를 생성합니다. 성공하면 true를 반환합니다. */
 static bool
 setup_stack (struct intr_frame *if_) {
 	bool success = false;
