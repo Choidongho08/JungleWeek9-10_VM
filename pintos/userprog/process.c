@@ -388,6 +388,15 @@ process_cleanup (void) {
 		pml4_activate (NULL);
 		pml4_destroy (pml4);
 	}
+
+	/* SPT 정리 후 실행 파일을 닫는다. */
+	if (curr->exec_file != NULL) {
+		lock_acquire(&file_lock);
+		file_close(curr->exec_file);
+		lock_release(&file_lock);
+
+		curr->exec_file = NULL;
+	}
 }
 
 /* Sets up the CPU for running user code in the nest thread.
@@ -645,13 +654,19 @@ load (const char *file_name, struct intr_frame *if_) {
 	success = true;
 
 done:
-	/* We arrive here whether the load is successful or not. */
-	lock_acquire(&file_lock);
-	file_close (file);
-	lock_release(&file_lock);
-	return success;
-}
+    lock_acquire(&file_lock);
 
+    if (success) {
+        /* 이후 지연 로딩에서 사용할 파일을 유지한다. */
+        file_deny_write(file);
+        t->exec_file = file;
+    } else {
+        file_close(file);
+    }
+
+    lock_release(&file_lock);
+    return success;
+}
 
 /* Checks whether PHDR describes a valid, loadable segment in
  * FILE and returns true if so, false otherwise. */
@@ -854,13 +869,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		struct vm_entry *aux;
+		struct vm_entry *aux = malloc(sizeof(struct vm_entry));
 		aux->file = file;
 		aux->offset = ofs;
-		aux->read_bytes = read_bytes;
-		aux->zero_bytes = zero_bytes;
+		aux->read_bytes = page_read_bytes;
+		aux->zero_bytes = page_zero_bytes;
 
-		if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable, lazy_load_segment, (void *)aux))
+		if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable, lazy_load_segment, aux))
 			return false;
 
 		/* Advance. */
@@ -887,7 +902,7 @@ setup_stack (struct intr_frame *if_) {
 	{
 		if(vm_claim_page(stack_bottom))
 		{
-			if_->rsp = stack_bottom;
+			if_->rsp = USER_STACK;
 			success = true;
 		}
 	}

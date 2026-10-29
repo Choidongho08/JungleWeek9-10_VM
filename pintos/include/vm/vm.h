@@ -46,6 +46,7 @@ struct page {
 	void *va;              /* Address in terms of user space */
 	struct frame *frame;   /* Back reference for frame */
 	struct hash_elem spt_hash_elem;
+	bool writable; /* True: write False: not write */
 
 	/* Your implementation */
 
@@ -65,7 +66,7 @@ struct page {
 struct frame {
 	void *kva;
 	struct page *page;
-	struct list_elem* elem;
+	struct list_elem elem;
 };
 
 /* The function table for page operations.
@@ -101,7 +102,7 @@ struct vm_entry {
 	size_t zero_bytes; // 0으로 채울 남은 페이지의 바이트
 	struct file* file; // 가상 주소와 매핑된 파일
 	
-}
+};
 #include "threads/thread.h"
 void supplemental_page_table_init (struct supplemental_page_table *spt);
 bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct supplemental_page_table *src);
