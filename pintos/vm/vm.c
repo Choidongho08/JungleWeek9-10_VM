@@ -286,11 +286,78 @@ void supplemental_page_table_init (struct supplemental_page_table *spt UNUSED)
 /* Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct supplemental_page_table *src) 
 {
+	struct hash_iterator iter;
+	struct hash_elem *elem;
+	hash_first(&iter, &src->spt_hash);
+
+	// src 해쉬를 하나씩 돌아줘야함.
+	for (elem = hash_next(&iter); elem != NULL; elem = hash_next(&iter)) {
+
+		/* 1. 부모 SPT의 요소 하나를 꺼냄 */
+		struct page *src_page = hash_entry(elem, struct page, spt_hash_elem);
+
+		/* 2. 페이지의 타입별 분기 처리. */
+		switch (src_page->operations->type)
+		{
+		case VM_UNINIT:
+		/* UNINIT의 경우에는 Frame이 할당되지 않았다. 디스크의 로딩 정보만 담겨있다.
+		 * aux에 정보가 담겨있다. lazy_loading 정보를 그대로 복사해주어야한다. 
+		 * 똑같은 정보를 똑같이 생성해준다. 
+		 * vm_alloc_page_with_initializer 안을 보면, &thread_current ()->spt에 insert를 해준다.
+		 * */
+			if (!vm_alloc_page_with_initializer(page_get_type(src_page), src_page->va, src_page->writable, src_page->uninit.page_initializer,src_page->uninit.aux)) {
+				return false;
+			}
+			break;
+		case VM_ANON:
+		/* 디스크에 백업 파일이 없는, 오직 힙(Heap)이나 스택(Stack) 같은 순수 메모리 데이터이다.
+		 * 새로운 물리 메모리 (Frame)을 할당 받고, 부모의 메모리 내용을 깊은 복사 해주어야한다. */
+
+			// 페이지 구조체를 생성하고 spt에 연결한다.
+			if (!vm_alloc_page(page_get_type(src_page),src_page->va, src_page->writable)) {
+				return false;
+			}
+			// 방금 생성한 페이지 구조체를 가져온다.
+			struct page *dst_page = spt_find_page(dst, src_page->va);
+			vm_claim_page(dst_page->va); // 페이지 구조체 안에 프레임을 할당한다.
+			memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE); // 부모 메모리의 kva를 깊은 복사한다.
+		break;
+
+		case VM_FILE:
+		/* 디스크의 특정 '파일'과 동기화되어 있는 페이지이다.
+		 * 파일의 명확한 특정 오프셋과 연결된 페이지이다. 
+		 * 이 페이지의 데이터가 바뀌면 나중에 디스크 파일에도 반영되어야 할 수 있어야 한다. 
+		 * 자식 프로세스의 SPT에도 해당 파일 객체(struct file), 오프셋(offset), 읽을 크기(read_bytes) 등의 파일 매핑 정보를 정확히 복사 및 연결해 주어야 한다. 
+		 * 현재 파일 구조체에 관련된 게 없으니, 일단 anon과 똑같이 처리한다. */
+			
+			// 페이지 구조체를 생성하고 spt에 연결한다.
+			if (!vm_alloc_page(page_get_type(src_page),src_page->va, src_page->writable)) {
+				return false;
+			}
+			// 방금 생성한 페이지 구조체를 가져온다.
+			dst_page = spt_find_page(dst, src_page->va);
+			vm_claim_page(dst_page->va); // 페이지 구조체 안에 프레임을 할당한다.
+			memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE); // 부모 메모리의 kva를 깊은 복사한다.
+		break;
+
+		}
+	}
+	
+	return true;
 }
 
-/* Free the resource hold by the supplemental page table */
+/* 보조 페이지 테이블이 보유한 리소스를 해제합니다 */
 void supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED)
 {
-	/* TODO: Destroy all the supplemental_page_table hold by thread and
-	 * TODO: writeback all the modified contents to the storage. */
+	/* TODO: 스레드가 보유한 모든 supplemental_page_table을 파괴하고
+	 * TODO: 수정된 모든 내용을 저장소에 다시 쓰기. */
+
+	struct hash_iterator iter;
+	struct hash_elem *elem;
+	hash_first(&iter, &spt->spt_hash);
+	// src 해쉬를 하나씩 돌아줘야함.
+	for (elem = hash_next(&iter); elem != NULL; elem = hash_next(&iter)) {
+		struct page *page = hash_entry(elem, struct page, spt_hash_elem);
+		destroy(page);
+	}
 }
