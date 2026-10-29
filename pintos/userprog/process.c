@@ -276,14 +276,12 @@ __do_fork (void *aux) {
 	/* 메모리 복제는 기존 연결을 유지한다. duplicate_pte는 메모리 담당 영역이다. */
 	current->pml4 = pml4_create();
 	if(current->pml4 == NULL){
-		PANIC("HERERRERER");
 		goto error;
 	}
 	process_activate(current);
 #ifdef VM
 	supplemental_page_table_init(&current->spt);
 	if(!supplemental_page_table_copy(&current->spt, &parent->spt)){
-		PANIC("HERERRERER");
 		goto error;
 	}
 #else
@@ -293,7 +291,6 @@ __do_fork (void *aux) {
 #endif
 
 	if(!duplicate_fd_table(parent)){
-		PANIC("HERERRERER");
 		goto error;
 	}
 	process_init();
@@ -311,7 +308,6 @@ error:
 	context->result = false;
 	sema_up(&context->parent_wait_sema);
 	/* 이미 등록된 파일과 페이지, 자식 참조는 기존 종료 경로에서 회수한다. */
-		PANIC("HERERRERER");
 	thread_exit();
 }
 

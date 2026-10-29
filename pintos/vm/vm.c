@@ -326,13 +326,14 @@ bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct s
 			{
 				return false;
 			}
-			page->uninit.init = src_page->uninit.init;
-			page->uninit.type = src_page->uninit.type;
+			uninit_new(page, src_page->va, src_page->uninit.init, src_page->uninit.type, NULL, src_page->uninit.page_initializer);
+			page->writable = src_page->writable;
 			page->uninit.aux = malloc(sizeof(struct vm_entry));
 			memcpy(page->uninit.aux, src_page->uninit.aux, sizeof(struct vm_entry));
-			page->uninit.page_initializer = src_page->uninit.page_initializer;
+			hash_insert(&dst->spt_hash, &page->spt_hash_elem);
 		}
 	}
+	return true;
 }
 
 /* Free the resource hold by the supplemental page table */
