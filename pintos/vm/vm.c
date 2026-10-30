@@ -197,18 +197,15 @@ vm_stack_growth (void *addr UNUSED) {
 	할당할 때 `addr`를 `PGSIZE`의 배수인 페이지 시작 주소로 내림해야 합니다.
 	**이번 프로젝트에서는 스택 크기를 최대 1MB로 제한해야 합니다.*/
 
-	pg_round_down(addr); // `addr`를 `PGSIZE`의 배수인 페이지 시작 주소로 내림
-	void *stack_bottom = (void *) (((uint8_t *) addr) - PGSIZE);
-
-	/*  하나 이상의 익명 페이지를 할당하여 `addr`에서 더 이상 폴트가 발생하지 않도록 스택 크기를 늘립니다. */
+	addr = pg_round_down(addr); // `addr`를 `PGSIZE`의 배수인 페이지 시작 주소로 내림
 
 	/* 1. 일단 alloc을 통해 페이지를 만듬
 	   2. do_claim을 통해 프레임을 매핑함
 	   3. 그리고 스택 크기를 늘림 */
 
-	if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, true))
+	if(vm_alloc_page(VM_ANON | VM_MARKER_0, addr, true))
 	{
-		vm_claim_page(stack_bottom);
+		vm_claim_page(addr);
 	}
 }
 
@@ -232,10 +229,6 @@ vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bo
 		return false;
 
 	if(not_present == true){
-		page = spt_find_page (spt, addr);
-		if(!page || write && !page->writable) 
-			return false;
-		
 		/* Stack Growth가 필요한 경우인지 검사 */
 		uintptr_t *rsp = NULL;
 
@@ -246,20 +239,26 @@ vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bo
 			rsp = thread_current()->rsp;
 		}
 
-		// 발생한 폴트가 스택 확장으로 처리할 수 있는 유효한 경우인지 검사
-		// 스택 접근으로 “보이는” 경우에만 추가 페이지를 할당
-		
-		/* 스택에 접근하는지 확인한다. anon 페이지일 경우에만 스택에 접근한다.
-		  스택 포인터보다 8바이트 낮은 주소에서 페이지 폴트가 발생할 수 있다. */
-	
-		if (VM_TYPE(page->operations->type) == VM_ANON) { 
-			struct anon_page *anon_page = &page->anon;
+		page = spt_find_page (spt, addr);
 
-			if (anon_page->is_stacked) {
+		// 페이지가 없을 때에는 스택 growth를 해줘야돼. 그때 적합한 주소 값인지 검사해야됨.
 
-				/* rsp는 long 형이기 때문에, rsp - 1 을 통해 확인 (그래도 8바이트임) */
-				if (addr >= rsp - 1) {
-					vm_stack_growth(addr);
+		// 1. addr이 스택 최대 크기 안에 있나?
+		// 2. addr이 현재 rsp 근처 또는 그 위에 있나?
+		// 둘 다 맞으면 스택을 늘린다.
+		if(!page && (USER_STACK + (1 << 20)) >= addr && addr >= rsp - 1) {
+			vm_stack_growth(addr);
+		}
+		else {	
+			if (VM_TYPE(page->operations->type) == VM_ANON) { 
+				struct anon_page *anon_page = &page->anon;
+
+				if (anon_page->is_stacked) {
+
+					/* rsp는 long 형이기 때문에, rsp - 1 을 통해 확인 (그래도 8바이트임) */
+					if (addr >= rsp - 1) {
+						vm_stack_growth(addr);
+					}
 				}
 			}
 		}
