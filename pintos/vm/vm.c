@@ -58,7 +58,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, v
 	/* Check wheter the upage is already occupied or not. */
 	if (spt_find_page (spt, upage) == NULL) {
 		/* TODO: 페이지를 생성하고, VM 유형에 따라 초기화자(initializer)를 가져온 뒤,
-		 * TODO: uninit_new를 호출하여 'uninit' 페이지 구조체를 생성하십시오. 
+		 * TODO: uninit_new를 호출하여 'uninit' 페이지 구조체를 생성하십시오.
 		 * TODO: uninit_new를 호출한 후에 해당 필드를 수정해야 합니다. */
 		struct page* new_page = malloc(sizeof (struct page));
 
@@ -83,10 +83,10 @@ err:
 
 /* Find VA from spt and return page. On error, return NULL. */
 struct page *
-spt_find_page (struct supplemental_page_table *spt, void *va) 
+spt_find_page (struct supplemental_page_table *spt, void *va)
 {
 	struct page *result = NULL;
-	result = malloc(sizeof(struct page)); 
+	result = malloc(sizeof(struct page));
 	/* TODO: Fill this function. */
 
 	result->va = pg_round_down(va); // va의 값이 가상 주소의 시작점을 의미하겠다는 보장이 없다. 그러니 pg_round_down을 통해 시작점으로 맞춰준다.
@@ -103,7 +103,7 @@ spt_find_page (struct supplemental_page_table *spt, void *va)
 
 /* Insert PAGE into spt with validation. */
 bool
-spt_insert_page (struct supplemental_page_table *spt, struct page *page) 
+spt_insert_page (struct supplemental_page_table *spt, struct page *page)
 {
 	int succ = false;
 	/* TODO: Fill this function. */
@@ -164,9 +164,9 @@ vm_evict_frame (void) {
 	return victim;
 }
 
-/* palloc() 및 프레임 가져오기. 
- * 사용 가능한 페이지가 없으면 해당 페이지를 제거하고 반환합니다. 
- * 항상 유효한 주소가 반환됩니다. 
+/* palloc() 및 프레임 가져오기.
+ * 사용 가능한 페이지가 없으면 해당 페이지를 제거하고 반환합니다.
+ * 항상 유효한 주소가 반환됩니다.
  * 즉, 사용자 풀 메모리가 가득 찼을 경우, 이 함수는 사용 가능한 메모리 공간을 확보하기 위해 프레임을 제거합니다
  *공간.*/
 static struct frame* vm_get_frame (void) {
@@ -193,7 +193,7 @@ static struct frame* vm_get_frame (void) {
 /* Growing the stack. */
 static void
 vm_stack_growth (void *addr UNUSED) {
-	/* 하나 이상의 익명 페이지를 할당하여 `addr`에서 더 이상 폴트가 발생하지 않도록 스택 크기를 늘립니다. 
+	/* 하나 이상의 익명 페이지를 할당하여 `addr`에서 더 이상 폴트가 발생하지 않도록 스택 크기를 늘립니다.
 	할당할 때 `addr`를 `PGSIZE`의 배수인 페이지 시작 주소로 내림해야 합니다.
 	**이번 프로젝트에서는 스택 크기를 최대 1MB로 제한해야 합니다.*/
 
@@ -216,7 +216,7 @@ vm_handle_wp (struct page *page UNUSED) {
 
 /* Return true on success */
 bool
-vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bool not_present) 
+vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bool not_present)
 {
 	// not_present = M.M에 적재되지 않은 상태면 true, M.M에 적재(매핑)되어 있으나 Fault가 나면 false
 	// user = user 모드로 접근했는지
@@ -225,7 +225,7 @@ vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bo
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
 	
-	if(addr == NULL || is_kernel_vaddr(addr)) 
+	if(addr == NULL || is_kernel_vaddr(addr))
 		return false;
 
 	if(not_present == true){
@@ -234,7 +234,7 @@ vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bo
 
 		if (user) {
 			rsp = f->rsp;
-		} 
+		}
 		else {
 			rsp = thread_current()->rsp;
 		}
@@ -279,9 +279,9 @@ vm_dealloc_page (struct page *page) {
 bool
 vm_claim_page (void *va UNUSED) {
 	struct page *page = NULL;
-	/* 페이지에 물리 프레임을 할당합니다. 
-	먼저 템플릿에 이미 작성되어 있는 vm_get_frame 호출로 프레임을 얻습니다. 
-	그다음 MMU를 설정해야 합니다. 즉, 페이지 테이블에 가상 주소에서 물리 주소로의 매핑을 추가합니다. 
+	/* 페이지에 물리 프레임을 할당합니다.
+	먼저 템플릿에 이미 작성되어 있는 vm_get_frame 호출로 프레임을 얻습니다.
+	그다음 MMU를 설정해야 합니다. 즉, 페이지 테이블에 가상 주소에서 물리 주소로의 매핑을 추가합니다.
 	반환값은 작업의 성공 여부를 나타내야 합니다. */
 	page = spt_find_page(&thread_current()->spt, va);
 	if (page == NULL) {
@@ -292,7 +292,7 @@ vm_claim_page (void *va UNUSED) {
 }
 
 /* Claim the PAGE and set up the mmu. */
-static bool vm_do_claim_page (struct page *page) 
+static bool vm_do_claim_page (struct page *page)
 {
 	struct frame *frame = vm_get_frame ();
 
@@ -331,7 +331,7 @@ void supplemental_page_table_init (struct supplemental_page_table *spt UNUSED)
 }
 
 /* Copy supplemental page table from src to dst */
-bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct supplemental_page_table *src) 
+bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct supplemental_page_table *src)
 {
 	struct hash_iterator it;
 	hash_first(&it, &src->spt_hash);
