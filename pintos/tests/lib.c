@@ -3,7 +3,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <syscall.h>
+#include <stdint.h>
+#include "user/syscall.h"
 
 const char *test_name;
 bool quiet = false;

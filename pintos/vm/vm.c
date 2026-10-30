@@ -129,6 +129,11 @@ static struct frame* vm_get_victim (void) {
 	struct frame *victim = NULL;
 	/* TODO: The policy for eviction is up to you. */
 
+	if(list_empty(&frame_table))
+	{
+		return NULL;
+	}
+	
 	victim = list_front(&frame_table);
 
 	return victim;
@@ -336,17 +341,16 @@ bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct s
 	return true;
 }
 
+ void spt_hash_clear_func(struct hash_elem *e, void *aux)
+ {
+	struct page *p = hash_entry(e, struct page, spt_hash_elem);
+	destroy(p);
+ }
+
 /* Free the resource hold by the supplemental page table */
 void supplemental_page_table_kill (struct supplemental_page_table *spt)
 {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
-	
-	struct hash_iterator it;
-	hash_first(&it, &spt->spt_hash);
-	while (hash_next(&it))
-	{
-		struct page *p = hash_entry (hash_cur(&it), struct page, spt_hash_elem);
-		destroy(p);
-	}
+	hash_clear(&spt->spt_hash, spt_hash_clear_func);
 }

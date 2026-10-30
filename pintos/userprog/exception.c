@@ -148,7 +148,6 @@ page_fault (struct intr_frame *f) {
 #endif
 	if (user)
 	{
-PANIC("ASDNKJNDAS");
 		sys_exit (-1);
 	}
 

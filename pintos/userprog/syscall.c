@@ -105,7 +105,7 @@ sys_exec (uint64_t rdi)
 	}
 
 	/* palloc이 실패 했을 때 */
-	fn_copy = palloc_get_page (0);
+	fn_copy = palloc_get_page(0);
 	if (fn_copy == NULL) {
 		sys_exit(-1);
 	}
@@ -113,7 +113,9 @@ sys_exec (uint64_t rdi)
 
 	/* process_exec이 돌아 왔을 때 */
 	if (process_exec (fn_copy) < 0)
+	{
 		sys_exit (-1); 
+	}
 }
 
 static void 
