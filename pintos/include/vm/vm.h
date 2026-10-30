@@ -100,9 +100,7 @@ struct vm_entry {
 	off_t offset; // 각 페이지의 읽어야 할 오프셋
 	size_t read_bytes; // 가상 페이지에 쓰여져 있는 데이터의 크기 
 	size_t zero_bytes; // 0으로 채울 남은 페이지의 바이트
-	struct file* file; // 가상 주소와 매핑된 파일
-	struct list_elem *elem;
-	
+	struct file* file; // 가상 주소와 매핑된 파일	
 };
 #include "threads/thread.h"
 void supplemental_page_table_init (struct supplemental_page_table *spt);
