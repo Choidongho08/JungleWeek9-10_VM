@@ -284,10 +284,11 @@ sys_read (int fd, void *buffer, unsigned size) {
 	page_addr = (uintptr_t) pg_round_down (buffer);
 	last_page = (uintptr_t) pg_round_down ((void *) end_addr);
 	while (page_addr <= last_page) {
-		if (pml4_get_page (thread_current ()->pml4,
-					(void *) page_addr) == NULL) {
-			sys_exit (-1);
-			return -1;
+		if (pml4_get_page (thread_current ()->pml4, (void *) page_addr) == NULL) {
+			if (!vm_claim_page(page_addr)) {
+				sys_exit (-1);
+				return -1;
+			}
 		}
 
 		/* 0은 새 매핑을 만들지 않고 기존 관리 항목만 조회한다는 뜻이다.
@@ -368,8 +369,10 @@ sys_write (int fd, const void *buffer, unsigned size) {
 		/* 실제 페이지 매핑 여부 검사 */
 		if (!pml4_get_page (thread_current()->pml4, (void *) page_addr))
 		{
-			sys_exit(-1);
-			return -1;
+			if (!vm_claim_page(page_addr)) {
+				sys_exit (-1);
+				return -1;
+			}
 		}
 		page_addr += PGSIZE;
 	}
@@ -560,9 +563,17 @@ check_file_name (const char *file_name) {
 		return false;
 
 	for (const char *p = file_name; ; p++) {
-		if (!is_user_vaddr (p)
-				|| pml4_get_page (thread_current ()->pml4, p) == NULL)
+		if (!is_user_vaddr (p)) {
 			return false;
+		}
+		
+		if (pml4_get_page (thread_current ()->pml4, p) == NULL) {
+			// pml4에 페이지가 등록되지 않았다. 물리 메모리가 없다. or 포인터가 유효하지 않은 접근이다.
+			// 그러면 물리 페이지에 등록을 해주어야한다. 
+			if (!vm_claim_page(p)) 
+				return false;
+		}
+
 		if (*p == '\0')
 			return true;
 	}

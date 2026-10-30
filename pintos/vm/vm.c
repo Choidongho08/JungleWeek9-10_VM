@@ -305,7 +305,9 @@ bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct s
 		 * 똑같은 정보를 똑같이 생성해준다. 
 		 * vm_alloc_page_with_initializer 안을 보면, &thread_current ()->spt에 insert를 해준다.
 		 * */
-			if (!vm_alloc_page_with_initializer(page_get_type(src_page), src_page->va, src_page->writable, src_page->uninit.page_initializer,src_page->uninit.aux)) {
+			struct vm_entry *aux = malloc(sizeof(struct vm_entry));
+			memcpy(aux, src_page->uninit.aux, sizeof(struct vm_entry));
+			if (!vm_alloc_page_with_initializer(page_get_type(src_page), src_page->va, src_page->writable, src_page->uninit.page_initializer, aux)) {
 				return false;
 			}
 			break;
@@ -351,13 +353,13 @@ void supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED)
 {
 	/* TODO: 스레드가 보유한 모든 supplemental_page_table을 파괴하고
 	 * TODO: 수정된 모든 내용을 저장소에 다시 쓰기. */
+	hash_clear(&spt->spt_hash, hash_destroy_action);
+}
 
-	struct hash_iterator iter;
-	struct hash_elem *elem;
-	hash_first(&iter, &spt->spt_hash);
-	// src 해쉬를 하나씩 돌아줘야함.
-	for (elem = hash_next(&iter); elem != NULL; elem = hash_next(&iter)) {
-		struct page *page = hash_entry(elem, struct page, spt_hash_elem);
-		destroy(page);
-	}
+void hash_destroy_action(struct hash_elem *e, void *aux) {
+	struct page* page = hash_entry(e, struct page, spt_hash_elem);
+	
+	if (!page) return;
+
+	destroy(page);
 }

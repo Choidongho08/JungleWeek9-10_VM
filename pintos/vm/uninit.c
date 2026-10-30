@@ -57,13 +57,18 @@ uninit_initialize (struct page *page, void *kva) {
 		(init ? init (page, aux) : true);
 }
 
-/* Free the resources hold by uninit_page. Although most of pages are transmuted
- * to other page objects, it is possible to have uninit pages when the process
- * exit, which are never referenced during the execution.
- * PAGE will be freed by the caller. */
+/* uninit_page가 보유한 자원을 해제합니다. 
+ * 대부분의 페이지가 다른 페이지 객체로 변환되지만, 
+ * 프로세스 종료 시 실행 중에 참조되지 않는 uninit 페이지가 존재할 수도 있습니다. 
+ * PAGE는 호출자가 해제합니다. */
 static void
 uninit_destroy (struct page *page) {
 	struct uninit_page *uninit UNUSED = &page->uninit;
 	/* TODO: Fill this function.
 	 * TODO: If you don't have anything to do, just return. */
+
+	 
+	 
+	 /* 페이지 구조체가 보유한 자원을 해제합니다. 페이지의 VM 유형을 확인하고 그에 맞게 처리할 수 있습니다.
+지금은 익명 페이지에 대해서만 처리하면 됩니다. 나중에 파일 기반 페이지를 정리하도록 이 함수를 다시 수정합니다.*/
 }
