@@ -68,6 +68,5 @@ static void uninit_destroy (struct page *page)
 	if(page->operations->type == VM_TYPE(VM_UNINIT))
 	{
 		struct uninit_page *uninit = &page->uninit;
-		free(uninit->aux);
 	}
 }

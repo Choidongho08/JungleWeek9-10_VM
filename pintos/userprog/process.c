@@ -678,7 +678,6 @@ load (const char *file_name, struct intr_frame *if_) {
 			case PT_INTERP:
 			case PT_SHLIB:
 			{
-				PANIC("HERE");
 				goto done;
 			}
 			case PT_LOAD:
@@ -966,6 +965,8 @@ lazy_load_segment (struct page *page, void *aux)
 	
 	// 물리 메모리에 적재를 해.
 	memset(page->frame->kva + entry->read_bytes, 0, entry->zero_bytes);
+
+	free(aux);
 
 	return true;
 }

@@ -575,9 +575,13 @@ check_file_name (const char *file_name) {
 		return false;
 
 	for (const char *p = file_name; ; p++) {
-		if (!is_user_vaddr (p)
-				|| pml4_get_page (thread_current ()->pml4, p) == NULL)
+		if (!is_user_vaddr (p))
 			return false;
+		if( pml4_get_page (thread_current ()->pml4, p) == NULL)
+		{
+			if(!vm_claim_page(p))
+				return false;
+		}
 		if (*p == '\0')
 			return true;
 	}
