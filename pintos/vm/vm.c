@@ -248,6 +248,7 @@ vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bo
 		// 둘 다 맞으면 스택을 늘린다.
 		if(!page && (USER_STACK + (1 << 20)) >= addr && addr >= rsp - 1) {
 			vm_stack_growth(addr);
+			page = spt_find_page(spt, addr);
 		}
 		else {	
 			if (VM_TYPE(page->operations->type) == VM_ANON) {
