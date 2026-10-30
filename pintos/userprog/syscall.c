@@ -474,6 +474,7 @@ sys_close (uint64_t rdi)
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
+	thread_current()->rsp = f->rsp;
 	switch ((SYS_CALL_NAME)f->R.rax)
 	{
 		case SYS_HALT:

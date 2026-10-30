@@ -46,10 +46,11 @@ anon_initializer (struct page *page, enum vm_type type, void *kva) {
 	/* 페이지의 오퍼레이션에 익명 페이지의 핸들러를 설정 */
 	page->operations = &anon_ops;
 
-	struct uninit_page* uninit = &page->uninit;
-
 	// 페이지를 특정 페이지 객체(anon, file, page_cache)로 변환합니다.
 	struct anon_page *anon_page = &page->anon;
+
+	// VM_MARKER_0이라면 is_stacked 를 1로 표시. stack에 접근을 할거라는 뜻
+	anon_page->is_stacked = (type & VM_MARKER_0) != 0;
 
 	return true;
 }
