@@ -246,23 +246,31 @@ vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bo
 		// 1. addr이 스택 최대 크기 안에 있나?
 		// 2. addr이 현재 rsp 근처 또는 그 위에 있나?
 		// 둘 다 맞으면 스택을 늘린다.
-		if(!page && (USER_STACK + (1 << 20)) >= addr && addr >= rsp - 1) {
+		if(!page && (USER_STACK - (1 << 20)) <= addr && addr >= rsp - 1) {
 			vm_stack_growth(addr);
-			page = spt_find_page(spt, addr);
+			page = spt_find_page (spt, addr);
 		}
-		else {	
+		else if(page){
 			if (VM_TYPE(page->operations->type) == VM_ANON) {
 				struct anon_page *anon_page = &page->anon;
 
 				if (anon_page->is_stacked) {
 
 					/* rsp는 long 형이기 때문에, rsp - 1 을 통해 확인 (그래도 8바이트임) */
-					if (addr >= rsp - 1) {
+					if (addr >= rsp - 1) 
+					{
 						vm_stack_growth(addr);
+						page = spt_find_page (spt, addr);
+					}
+					else
+					{
+						return false;
 					}
 				}
 			}
 		}
+		else
+			return false;
 		return vm_do_claim_page (page);
 	}
 	return false;
