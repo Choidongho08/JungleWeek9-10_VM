@@ -335,7 +335,9 @@ process_exec (void *f_name) {
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
 	if (!success)
+	{
 		return -1;
+	}
 
 	/* Start switched process. */
 	do_iret (&_if);
@@ -610,12 +612,16 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
+	{
 		goto done;
+	}
 	process_activate (thread_current ());
 
 	/* file_name 유효 검증 */
 	if (file_name == NULL)
+	{
 		goto done;
+	}
 
 	/* parse_buffer에 복사해서 첫 토큰 자르기. */
 	strlcpy (parse_buffer, file_name, sizeof (parse_buffer));
@@ -649,12 +655,16 @@ load (const char *file_name, struct intr_frame *if_) {
 
 		// lock 
 		if (file_ofs < 0 || file_ofs > file_length (file))
+		{
 			goto done;
+		}
 		file_seek (file, file_ofs);
 
 		// lock
 		if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
+		{
 			goto done;
+		}
 		file_ofs += sizeof phdr;
 		switch (phdr.p_type) {
 			case PT_NULL:
@@ -667,7 +677,9 @@ load (const char *file_name, struct intr_frame *if_) {
 			case PT_DYNAMIC:
 			case PT_INTERP:
 			case PT_SHLIB:
+			{
 				goto done;
+			}
 			case PT_LOAD:
 				if (validate_segment (&phdr, file)) {
 					bool writable = (phdr.p_flags & PF_W) != 0;
@@ -687,19 +699,24 @@ load (const char *file_name, struct intr_frame *if_) {
 						read_bytes = 0;
 						zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
 					}
-					if (!load_segment (file, file_page, (void *) mem_page,
-								read_bytes, zero_bytes, writable))
+					if (!load_segment (file, file_page, (void *) mem_page, read_bytes, zero_bytes, writable))
+					{
 						goto done;
+					}
 				}
 				else
+				{
 					goto done;
+				}
 				break;
 		}
 	}
 
 	/* Set up stack. */
 	if (!setup_stack (if_))
+	{
 		goto done;
+	}
 
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
@@ -713,7 +730,9 @@ load (const char *file_name, struct intr_frame *if_) {
 	for (; token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
 		token_size = strlen (token) + 1;
 		if (!(is_stack_space_available (if_->rsp, token_size) && argc < sizeof (arg_addrs) / sizeof (arg_addrs[0])))
+		{
 			goto done;
+		}
 		if_->rsp -= token_size;
 		strlcpy ((char *) if_->rsp, token, token_size);
 		arg_addrs [argc] = (char *) if_->rsp;
@@ -727,18 +746,24 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* 스택 페이지는 setup_stack 에서 palloc_get_page (PAL_USER | PAL_ZERO) 로 받아
 	   이미 0 으로 채워져 있으므로, 패딩 자리를 따로 채우지 않는다. */
 	if (!is_stack_space_available (if_->rsp, padding))
+	{
 		goto done;
+	}
 	if_->rsp -= padding;
 	
 	/* 명령행 인자 목록의 끝을 나타내는 null 포인터 추가. */
 	if (!(argc < sizeof (arg_addrs) / sizeof (arg_addrs [0]))) 
+	{
 		goto done;
+	}
 	arg_addrs [argc] = NULL;
 
 	/* arg_addrs를 유저스택에 넣는 반복문 실행. */
 	for (i = argc; i >= 0; i--){
 		if (!is_stack_space_available (if_->rsp, sizeof (arg_addrs [0])))
+		{
 			goto done;
+		}
 		if_->rsp -= sizeof (arg_addrs [i]);
 		*(char **) if_->rsp = arg_addrs [i];
 
@@ -941,6 +966,8 @@ lazy_load_segment (struct page *page, void *aux)
 	// 물리 메모리에 적재를 해.
 	memset(page->frame->kva + entry->read_bytes, 0, entry->zero_bytes);
 
+	free(aux);
+
 	return true;
 }
 
@@ -980,7 +1007,9 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes,
 		aux->zero_bytes = page_zero_bytes;
 
 		if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable, lazy_load_segment, aux))
+		{
 			return false;
+		}
 
 		/* Advance. */
 		read_bytes -= page_read_bytes;

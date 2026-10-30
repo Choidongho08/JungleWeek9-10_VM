@@ -105,7 +105,7 @@ sys_exec (uint64_t rdi)
 	}
 
 	/* palloc이 실패 했을 때 */
-	fn_copy = palloc_get_page (0);
+	fn_copy = palloc_get_page(0);
 	if (fn_copy == NULL) {
 		sys_exit(-1);
 	}
@@ -113,7 +113,9 @@ sys_exec (uint64_t rdi)
 
 	/* process_exec이 돌아 왔을 때 */
 	if (process_exec (fn_copy) < 0)
+	{
 		sys_exit (-1); 
+	}
 }
 
 static void 
@@ -274,8 +276,7 @@ sys_read (int fd, void *buffer, unsigned size) {
 	end_addr = start_addr + size - 1;
 
 	/* 시작과 끝이 모두 사용자 주소 범위 안에 있어야 한다. */
-	if (!is_user_vaddr (buffer)
-			|| !is_user_vaddr ((void *) end_addr)) {
+	if (!is_user_vaddr (buffer) || !is_user_vaddr ((void *) end_addr)) {
 		sys_exit (-1);
 		return -1;
 	}
@@ -284,19 +285,30 @@ sys_read (int fd, void *buffer, unsigned size) {
 	page_addr = (uintptr_t) pg_round_down (buffer);
 	last_page = (uintptr_t) pg_round_down ((void *) end_addr);
 	while (page_addr <= last_page) {
-		if (pml4_get_page (thread_current ()->pml4,
-					(void *) page_addr) == NULL) {
-			sys_exit (-1);
-			return -1;
+		if (pml4_get_page(thread_current()->pml4, (void *)page_addr) == NULL)
+		{
+			if(!vm_claim_page(page_addr))
+			// 이거 없으면 read_boundary오류남. 왜 추가헀냐? pml4_get_page에서 NULL이 나오는건 2가지 상황이 있음
+			// 1. page와 frame 연결(매핑)되어 있지 않음
+			// 2. 유효하지 않은 접근
+			// 1번의 경우 페이지폴트로 넘어가서 페이지를 가져와야함. 근데 pml4_get_page는 페이지 폴트를 발생시키지 않음. 따라서 vm_claim_page로 page가 매핑되도록 하면 됨.
+			{
+				sys_exit (-1);
+				return -1;
+			}
 		}
 
 		/* 0은 새 매핑을 만들지 않고 기존 관리 항목만 조회한다는 뜻이다.
 		 * read는 버퍼에 써 넣으므로 사용자 접근 및 쓰기 권한이 필요하다.
 		 * 앞의 NULL 조건이 참이면 뒤의 권한 검사는 실행하지 않는다. */
 		pte = pml4e_walk (thread_current ()->pml4, page_addr, 0);
-		if (pte == NULL || !is_user_pte (pte) || !is_writable (pte)) {
-			sys_exit (-1);
-			return -1;
+		if (pte == NULL || !is_user_pte (pte) || !is_writable (pte)) 
+		{
+			if(!vm_claim_page(page_addr))
+			{
+				sys_exit (-1);
+				return -1;
+			}
 		}
 		page_addr += PGSIZE;
 	}
@@ -368,8 +380,11 @@ sys_write (int fd, const void *buffer, unsigned size) {
 		/* 실제 페이지 매핑 여부 검사 */
 		if (!pml4_get_page (thread_current()->pml4, (void *) page_addr))
 		{
-			sys_exit(-1);
-			return -1;
+			if(!vm_claim_page(page_addr))
+			{
+				sys_exit(-1);
+				return -1;
+			}
 		}
 		page_addr += PGSIZE;
 	}
@@ -560,9 +575,13 @@ check_file_name (const char *file_name) {
 		return false;
 
 	for (const char *p = file_name; ; p++) {
-		if (!is_user_vaddr (p)
-				|| pml4_get_page (thread_current ()->pml4, p) == NULL)
+		if (!is_user_vaddr (p))
 			return false;
+		if( pml4_get_page (thread_current ()->pml4, p) == NULL)
+		{
+			if(!vm_claim_page(p))
+				return false;
+		}
 		if (*p == '\0')
 			return true;
 	}

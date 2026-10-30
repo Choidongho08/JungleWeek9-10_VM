@@ -53,7 +53,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable, v
 
 	ASSERT (VM_TYPE(type) != VM_UNINIT)
 
-	struct supplemental_page_table *spt = &thread_current ()->spt;
+	struct supplemental_page_table *spt = &thread_current()->spt;
 
 	/* Check wheter the upage is already occupied or not. */
 	if (spt_find_page (spt, upage) == NULL) {
@@ -129,6 +129,11 @@ static struct frame* vm_get_victim (void) {
 	struct frame *victim = NULL;
 	/* TODO: The policy for eviction is up to you. */
 
+	if(list_empty(&frame_table))
+	{
+		return NULL;
+	}
+	
 	victim = list_front(&frame_table);
 
 	return victim;
@@ -199,25 +204,24 @@ vm_handle_wp (struct page *page UNUSED) {
 bool
 vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bool not_present) 
 {
-	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
+	// not_present = M.M에 적재되지 않은 상태면 true, M.M에 적재(매핑)되어 있으나 Fault가 나면 false
+	// user = user 모드로 접근했는지
+	struct supplemental_page_table *spt  = &thread_current ()->spt;
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-
-	// /* 커널 영역에 있진 않는지, 쓰기 가능한지, 존재하는지 확인 */
-	// if(!user || !write || not_present)
-	// {
-	// 	return false;
-	// }
-
-	/* 오류가 난 주소가 SPT에 저장 되어 있는지 확인 */
-	page = spt_find_page(spt, addr);
-	if(!page)
-	{
+	
+	if(addr == NULL || is_kernel_vaddr(addr)) 
 		return false;
-	}
 
-	return vm_do_claim_page (page);
+	if(not_present == true){
+		page = spt_find_page (spt, addr);
+		if(!page || write && !page->writable) 
+			return false;
+
+		return vm_do_claim_page (page);
+	}
+	return false;
 }
 
 /* Free the page.
@@ -253,7 +257,7 @@ static bool vm_do_claim_page (struct page *page)
 	frame->page = page;
 	page->frame = frame;
 	
-	if (!pml4_set_page(thread_current() -> pml4, page->va, frame->kva, page->writable)) {
+	if (!pml4_set_page(thread_current()-> pml4, page->va, frame->kva, page->writable)) {
 		vm_dealloc_page(page); // page를 물리 메모리와 가상 공간에서 전부 지운다.
 		return false;
 	}
@@ -286,11 +290,67 @@ void supplemental_page_table_init (struct supplemental_page_table *spt UNUSED)
 /* Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct supplemental_page_table *src) 
 {
+	struct hash_iterator it;
+	hash_first(&it, &src->spt_hash);
+	while (hash_next(&it))
+	{
+		struct page *src_page = hash_entry (hash_cur(&it), struct page, spt_hash_elem);
+		struct page* page = NULL;
+		if(VM_TYPE(src_page->operations->type) == VM_ANON)
+		{
+			if(!vm_alloc_page(VM_ANON, src_page->va, src_page->writable))
+			{
+				return false;
+			}
+			page = spt_find_page(dst, src_page->va);
+			if(!page)
+			{
+				return false;
+			}
+			vm_do_claim_page(page);
+			memcpy(page->frame->kva, src_page->frame->kva, PGSIZE);
+		}
+		else if(VM_TYPE(src_page->operations->type) == VM_FILE)
+		{
+			if(!vm_alloc_page(VM_FILE, src_page->va, src_page->writable))
+			{
+				return false;
+			}
+			page = spt_find_page(dst, src_page->va);
+			if(!page)
+			{
+				return false;
+			}
+			vm_do_claim_page(page);
+			memcpy(page->frame->kva, src_page->frame->kva, PGSIZE);
+		}
+		else
+		{
+			page = malloc(sizeof(struct page));
+			if(!page)
+			{
+				return false;
+			}
+			uninit_new(page, src_page->va, src_page->uninit.init, src_page->uninit.type, NULL, src_page->uninit.page_initializer);
+			page->writable = src_page->writable;
+			page->uninit.aux = malloc(sizeof(struct vm_entry));
+			memcpy(page->uninit.aux, src_page->uninit.aux, sizeof(struct vm_entry));
+			hash_insert(&dst->spt_hash, &page->spt_hash_elem);
+		}
+	}
+	return true;
 }
 
+ void spt_hash_clear_func(struct hash_elem *e, void *aux)
+ {
+	struct page *p = hash_entry(e, struct page, spt_hash_elem);
+	destroy(p);
+ }
+
 /* Free the resource hold by the supplemental page table */
-void supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED)
+void supplemental_page_table_kill (struct supplemental_page_table *spt)
 {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
+	hash_clear(&spt->spt_hash, spt_hash_clear_func);
 }
