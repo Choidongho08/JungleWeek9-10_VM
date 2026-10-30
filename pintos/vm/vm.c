@@ -44,6 +44,7 @@ page_get_type (struct page *page) {
 static struct frame *vm_get_victim (void);
 static bool vm_do_claim_page (struct page *page);
 static struct frame *vm_evict_frame (void);
+void destroy_spt(struct hash_elem *elem, struct vm_entry *aux);
 
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
@@ -284,13 +285,79 @@ void supplemental_page_table_init (struct supplemental_page_table *spt UNUSED)
 }
 
 /* Copy supplemental page table from src to dst */
+// 소스(src)의 보조 페이지 테이블을 대상(dst)으로 복사합니다.
+// 이는 자식 프로세스가 부모 프로세스의 실행 컨텍스트를 상속해야 할 때 사용됩니다 fork(). 
+// 소스 프로세스의 보조 페이지 테이블에 있는 각 페이지를 순회하면서 대상 프로세스의 보조 페이지 테이블에 해당 항목을 정확히 복사합니다.
+// 초기화되지 않은 페이지를 할당하고 즉시 사용해야 합니다.
 bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct supplemental_page_table *src) 
 {
+	struct hash_iterator it;
+	struct hash_elem *e;
+	struct page *page;
+	struct page *new_page;
+
+	// 1. dst테이블의 버켓을 차례대로 순회. 
+	hash_first(&it, &src->spt_hash);
+
+	while(hash_next(&it) != NULL) {
+		e = hash_cur(&it);
+	
+	// 2. 차레대로 순회 후 해당 버킷의 페이지를 가져옴.
+		page = hash_entry(e, struct page, spt_hash_elem);
+
+	// 3. 해당 페이지 타입별 맞게 항목을 복사.
+		if (page_get_type(page) == VM_ANON) {
+			if (!vm_alloc_page(VM_ANON, page->va, page->writable))
+			{
+				PANIC("ASDASD");
+				return false;
+			}
+			new_page = spt_find_page(dst, page->va);
+			vm_claim_page(new_page->va);
+			memcpy(new_page->frame->kva, page->frame->kva, PGSIZE);
+		}
+
+		else if (page_get_type(page) == VM_FILE) {
+			if (!vm_alloc_page(VM_ANON, page->va, page->writable))
+			{
+				PANIC("ASDASD");
+				return false;
+			}
+			
+			new_page = spt_find_page(dst, page->va);
+			vm_claim_page(new_page->va);
+			memcpy(new_page->frame->kva, page->frame->kva, PGSIZE);
+		}
+
+		else if (page_get_type(page) == VM_UNINIT) {
+			struct vm_entry *aux = malloc(sizeof(struct vm_entry));
+			memcpy(aux, page->uninit.aux, sizeof(struct vm_entry));
+			if (!vm_alloc_page_with_initializer(page->operations->type, page->va, page->writable, page->uninit.init, aux))
+			{
+
+				PANIC("ASDASD");
+				return false;
+			}
+		}
+	}
+	return true;
 }
 
 /* Free the resource hold by the supplemental page table */
+// 보조 페이지 테이블이 보유한 모든 자원을 해제합니다
+// 프로세스 종료 시 userprog/process.c의 process_exit()에서 호출됩니다.
+// 테이블의 페이지 항목들을 순회하고 각 페이지에 destroy(page)를 호출해야 합니다. 
+// 이 함수에서는 실제 페이지 테이블(pml4)과 palloc으로 할당한 물리 메모리의 정리까지 직접 처리할 필요는 없습니다
+// 호출자가 보조 페이지 테이블 정리 후 처리합니다.
 void supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED)
 {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
+	hash_clear(&spt->spt_hash, destroy_spt);
+}
+
+
+void destroy_spt(struct hash_elem *elem, struct vm_entry *aux) {
+	// free(&aux);
+	destroy(hash_entry(elem, struct page, spt_hash_elem));
 }
