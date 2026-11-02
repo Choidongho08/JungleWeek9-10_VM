@@ -39,7 +39,7 @@ static int sys_write (int fd, const void *buffer, unsigned size);
 static void sys_seek (int fd, off_t pos);
 static int sys_tell (int fd);
 static void sys_close (uint64_t rdi);
-
+static void sys_mmap (void *addr, size_t length, int writable, int fd, off_t offset);
 
 /* System call.
  *
@@ -470,6 +470,14 @@ sys_close (uint64_t rdi)
 	}
 }
 
+static void
+sys_mmap (void *addr, size_t length, int writable, int fd, off_t offset)
+{
+	// // 성공하면 매핑된 가상 주소를 반환합니다. 실패하면 파일을 매핑할 수 없는 주소인 NULL을 반환해야 합니다.
+	do_mmap(addr, length, writable, fd, offset);
+	return;
+}
+
 
 /* The main system call interface */
 void
@@ -564,6 +572,10 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		}
 		break;
 
+		case SYS_MMAP:
+		{
+			sys_mmap (f->R.rdi, (const void *) f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+		}
 		default :
 			thread_exit ();
 	}
