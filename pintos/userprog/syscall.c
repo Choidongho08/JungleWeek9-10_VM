@@ -287,11 +287,11 @@ sys_read (int fd, void *buffer, unsigned size) {
 	while (page_addr <= last_page) {
 		if (pml4_get_page(thread_current()->pml4, (void *)page_addr) == NULL)
 		{
-			if(!vm_claim_page(page_addr))
-			// 이거 없으면 read_boundary오류남. 왜 추가헀냐? pml4_get_page에서 NULL이 나오는건 2가지 상황이 있음
-			// 1. page와 frame 연결(매핑)되어 있지 않음
-			// 2. 유효하지 않은 접근
-			// 1번의 경우 페이지폴트로 넘어가서 페이지를 가져와야함. 근데 pml4_get_page는 페이지 폴트를 발생시키지 않음. 따라서 vm_claim_page로 page가 매핑되도록 하면 됨.
+			// 현재 페이지에서 실제 버퍼에 속하는 첫 주소를 구한다.
+			// 페이지가 매핑되지 않았다면 fault 처리로 매핑 또는 스택 확장을 시도한다.
+			// read는 버퍼에 쓰므로 쓰기 가능한 주소여야 한다.
+			uintptr_t access_addr = page_addr < start_addr ? start_addr : page_addr;
+			if (!vm_try_handle_fault (NULL, (void *) access_addr, false, true, true))
 			{
 				sys_exit (-1);
 				return -1;
@@ -304,11 +304,8 @@ sys_read (int fd, void *buffer, unsigned size) {
 		pte = pml4e_walk (thread_current ()->pml4, page_addr, 0);
 		if (pte == NULL || !is_user_pte (pte) || !is_writable (pte)) 
 		{
-			if(!vm_claim_page(page_addr))
-			{
-				sys_exit (-1);
-				return -1;
-			}
+			sys_exit (-1);
+			return -1;
 		}
 		page_addr += PGSIZE;
 	}
