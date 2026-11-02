@@ -1,6 +1,9 @@
 /* file.c: Implementation of memory backed file object (mmaped object). */
 
 #include "vm/vm.h"
+#include "threads/vaddr.h"
+#include "string.h"
+#include "threads/malloc.h"
 
 static bool file_backed_swap_in (struct page *page, void *kva);
 static bool file_backed_swap_out (struct page *page);
@@ -46,10 +49,44 @@ file_backed_destroy (struct page *page) {
 	struct file_page *file_page UNUSED = &page->file;
 }
 
+static bool file_page_initializer(struct page* page, void* aux)
+{
+	struct file_page_data* data = (struct file_page_data*)page->uninit.aux;
+	
+	memset(page->va, 0, PGSIZE);
+	file_read_at(data->file, page->va, PGSIZE, data->offset + (data->off_mag * PGSIZE));
+	
+	free(page->uninit.aux);
+	return true;
+}
+
 /* Do the mmap */
 void *
-do_mmap (void *addr, size_t length, int writable,
-		struct file *file, off_t offset) {
+do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offset) 
+{
+	if(!addr || pg_ofs(addr) != 0 || length == 0)
+	{
+		return NULL;
+	}
+	
+	void* temp_addr = addr;
+	int page_count = length / PGSIZE;
+	for(int i = 0; i < page_count; ++i)
+	{
+		struct file_page_data* data = malloc(sizeof(struct file_page_data));
+		data->file = file;
+		data->length = length;
+		data->offset = offset;
+		data->off_mag = i;
+
+		if(!vm_alloc_page_with_initializer(VM_FILE, temp_addr, writable, file_page_initializer, data))
+		{
+			return NULL;
+		}
+		temp_addr += PGSIZE;
+	}
+
+	return addr;
 }
 
 /* Do the munmap */

@@ -564,6 +564,24 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		}
 		break;
 
+		case SYS_MMAP:
+		{
+			int fd = f->R.r10;
+			if(fd == 0 || fd == 1)
+			{
+				f->R.rax = -1;
+				return;
+			}
+			struct file* file = find_file(fd);
+			if(!file)
+			{
+				f->R.rax = -1;
+				return;
+			}
+			f->R.rax = do_mmap((void*)f->R.rdi, (size_t)f->R.rsi, (int)f->R.rdx, file, (off_t)f->R.r8);
+		}
+		break;
+
 		default :
 			thread_exit ();
 	}
