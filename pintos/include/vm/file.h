@@ -16,6 +16,10 @@ struct file_page_data
 
 struct file_page 
 {
+	struct file* file;
+	size_t length;
+	off_t off;
+	int off_mag;
 };
 
 void vm_file_init (void);

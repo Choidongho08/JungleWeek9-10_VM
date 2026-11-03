@@ -4,6 +4,7 @@
 #include "threads/vaddr.h"
 #include "string.h"
 #include "threads/malloc.h"
+#include "threads/mmu.h"
 
 static bool file_backed_swap_in (struct page *page, void *kva);
 static bool file_backed_swap_out (struct page *page);
@@ -51,12 +52,16 @@ file_backed_destroy (struct page *page) {
 
 static bool file_page_initializer(struct page* page, void* aux)
 {
-	struct file_page_data* data = (struct file_page_data*)page->uninit.aux;
+	struct file_page_data data = *(struct file_page_data*)aux;
 	
 	memset(page->va, 0, PGSIZE);
-	file_read_at(data->file, page->va, PGSIZE, data->offset + (data->off_mag * PGSIZE));
+	file_read_at(data.file, page->va, PGSIZE, data.offset + (data.off_mag * PGSIZE));
+	page->file.file = data.file;
+	page->file.length = data.length;
+	page->file.off = data.offset;
+	page->file.off_mag = data.off_mag;
 	
-	free(page->uninit.aux);
+	free(aux);
 	return true;
 }
 
@@ -91,5 +96,20 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 
 /* Do the munmap */
 void
-do_munmap (void *addr) {
+do_munmap (void *addr) 
+{
+	struct page* p = spt_find_page(&thread_current()->spt, addr);
+	if(!p)
+	{
+		return;
+	}
+
+	if(p->frame && pml4_is_dirty(thread_current()->pml4, p->frame->kva))
+	{
+		void* buff = pg_round_down(addr);
+		off_t off = PGSIZE * p->file.off_mag;
+		file_write_at(p->file.file, buff, PGSIZE, off);
+	}
+
+	spt_remove_page(&thread_current()->spt, p);
 }

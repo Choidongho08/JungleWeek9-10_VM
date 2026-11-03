@@ -470,6 +470,27 @@ sys_close (uint64_t rdi)
 	}
 }
 
+static uint64_t sys_mmap(uint64_t rdi, uint64_t rsi, uint64_t rdx, uint64_t r10, uint64_t r8)
+{
+	int fd = r10;
+	if(fd == 0 || fd == 1)
+	{
+		return -1;
+	}
+	struct file* file = find_file(fd);
+	file = file_reopen(file);
+	if(!file)
+	{
+		return -1;
+	}
+	return do_mmap((void*)rdi, (size_t)rsi, (int)rdx, file, (off_t)r8);
+}
+
+static void sys_munmap(uint64_t rdi)
+{
+	void* addr = (void*)rdi;
+	do_munmap(addr);
+}
 
 /* The main system call interface */
 void
@@ -566,19 +587,13 @@ syscall_handler (struct intr_frame *f UNUSED) {
 
 		case SYS_MMAP:
 		{
-			int fd = f->R.r10;
-			if(fd == 0 || fd == 1)
-			{
-				f->R.rax = -1;
-				return;
-			}
-			struct file* file = find_file(fd);
-			if(!file)
-			{
-				f->R.rax = -1;
-				return;
-			}
-			f->R.rax = do_mmap((void*)f->R.rdi, (size_t)f->R.rsi, (int)f->R.rdx, file, (off_t)f->R.r8);
+			f->R.rax = sys_mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+		}
+		break;
+
+		case SYS_MUNMAP:
+		{
+			sys_munmap(f->R.rdi);
 		}
 		break;
 
