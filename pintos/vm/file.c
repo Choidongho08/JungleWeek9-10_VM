@@ -5,6 +5,7 @@
 #include "string.h"
 #include "threads/malloc.h"
 #include "threads/mmu.h"
+#include "userprog/syscall.h"
 
 static bool file_backed_swap_in (struct page *page, void *kva);
 static bool file_backed_swap_out (struct page *page);
@@ -30,6 +31,8 @@ file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
 	page->operations = &file_ops;
 
 	struct file_page *file_page = &page->file;
+
+	return true;
 }
 
 /* Swap in the page by read contents from the file. */
@@ -75,8 +78,8 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 	}
 	
 	void* temp_addr = addr;
-	int page_count = length / PGSIZE;
-	for(int i = 0; i < page_count; ++i)
+	int page_count = (length + PGSIZE - 1) / PGSIZE;
+	for(int i = 0; i < page_count + 1; ++i)
 	{
 		struct file_page_data* data = malloc(sizeof(struct file_page_data));
 		data->file = file;
@@ -104,12 +107,29 @@ do_munmap (void *addr)
 		return;
 	}
 
-	if(p->frame && pml4_is_dirty(thread_current()->pml4, p->frame->kva))
+	int pg_count = (p->file.length + PGSIZE - 1) / PGSIZE;
+	for(int i = 0; i < pg_count + 1; ++i)
 	{
-		void* buff = pg_round_down(addr);
-		off_t off = PGSIZE * p->file.off_mag;
-		file_write_at(p->file.file, buff, PGSIZE, off);
-	}
+		void* temp_addr = addr + (PGSIZE * i);
+		p = spt_find_page(&thread_current()->spt, temp_addr);
+		if(!p)
+			return;
 
-	spt_remove_page(&thread_current()->spt, p);
+		if(p->frame)
+		{
+			if(pml4_is_dirty(thread_current()->pml4, p->va))
+			{
+				void* buff = pg_round_down(p->va);
+				off_t off = PGSIZE * i;
+				lock_acquire(&file_lock);
+				file_write_at(p->file.file, buff, PGSIZE, p->file.off + off);
+				lock_release(&file_lock);
+			}
+
+			pml4_clear_page(thread_current()->pml4, p->va);
+			palloc_free_page(p->frame->kva);
+		}
+
+		spt_remove_page(&thread_current()->spt, p);
+	}
 }

@@ -7,6 +7,7 @@
 #include "list.h"
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
+#include "userprog/syscall.h"
 
 static struct list frame_table;
 
@@ -400,9 +401,66 @@ bool supplemental_page_table_copy (struct supplemental_page_table *dst, struct s
 	destroy(p);
  }
 
+struct spt_kill_file_page
+{
+	struct page* page;
+	struct list_elem elem;
+};
+
 /* Free the resource hold by the supplemental page table */
 void supplemental_page_table_kill (struct supplemental_page_table *spt)
 {
+	if(!spt->spt_hash.buckets)
+	{
+		
+	hash_clear(&spt->spt_hash, spt_hash_clear_func);
+	return;
+	}
+
+	struct list list;
+	list_init(&list);
+
+	struct hash_iterator it;
+	hash_first(&it, &spt->spt_hash);
+	while(hash_next(&it) != NULL)
+	{
+		struct page* p = hash_entry(it.elem, struct page, spt_hash_elem);
+		if(!p)
+		{
+			continue;
+		}
+		if(page_get_type(p) != VM_FILE)
+		{
+			continue;
+		}
+
+		if(VM_TYPE(p->operations->type) != VM_UNINIT && p->file.off_mag == 0)
+		{
+			struct spt_kill_file_page* data = malloc(sizeof(struct spt_kill_file_page));
+			data->page = p;
+			list_push_back(&list, &data->elem);
+		}
+	}
+
+	if(!list_empty(&list))
+	{
+		for(struct list_elem* elem = list_front(&list); elem != list_end(&list); )
+		{
+			struct spt_kill_file_page* data = list_entry(elem, struct spt_kill_file_page, elem);
+			struct page* p = data->page;
+			if(VM_TYPE(p->operations->type) == VM_UNINIT)
+			{
+				spt_remove_page(&thread_current()->spt, p);
+			}
+			else
+			{
+				do_munmap(p->va);
+			}
+			elem = list_next(elem);
+			free(data);
+		}
+	}
+	
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
 	hash_clear(&spt->spt_hash, spt_hash_clear_func);
