@@ -470,6 +470,18 @@ sys_close (uint64_t rdi)
 	}
 }
 
+/* addr: 파일을 매핑할 가상 메모리 시작 주소, length: 매핑할 파일의 바이트 크기, 
+writable: 매핑된 메모리에 쓰기를 허용할지 여부, fd: 매핑할 파일의 파일 디스크립터,
+offset: 파일에서 매핑을 시작할 위치 */
+
+/* 파일을 가상 메모리에 매핑해 달라고 요청 */
+void *
+sys_mmap (void *addr, size_t length, int writable, int fd, off_t offset) 
+{	
+	struct file *file = find_file(fd);
+	do_mmap(addr, length, writable, file, offset);
+};
+
 
 /* The main system call interface */
 void
@@ -563,6 +575,11 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			sys_close (f->R.rdi);
 		}
 		break;
+
+		case SYS_MMAP:
+		{
+			sys_mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+		}
 
 		default :
 			thread_exit ();
