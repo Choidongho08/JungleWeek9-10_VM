@@ -473,11 +473,16 @@ sys_close (uint64_t rdi)
 static void
 sys_mmap (void *addr, size_t length, int writable, int fd, off_t offset)
 {
-	// // 성공하면 매핑된 가상 주소를 반환합니다. 실패하면 파일을 매핑할 수 없는 주소인 NULL을 반환해야 합니다.
-	do_mmap(addr, length, writable, fd, offset);
+	struct file *file = find_file(fd);
+	if (!file) return;
+	do_mmap(addr, length, writable, file, offset);
 	return;
 }
-
+static void 
+sys_mummap (void *addr) 
+{
+	do_munmap(addr);
+}
 
 /* The main system call interface */
 void
@@ -575,6 +580,10 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_MMAP:
 		{
 			sys_mmap (f->R.rdi, (const void *) f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+		}
+		case SYS_MUNMAP:
+		{
+			sys_mummap (f->R.rdi);
 		}
 		default :
 			thread_exit ();
