@@ -257,7 +257,6 @@ vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bo
 				struct anon_page *anon_page = &page->anon;
 
 				if (anon_page->is_stacked) {
-
 					/* rsp는 long 형이기 때문에, rsp - 1 을 통해 확인 (그래도 8바이트임) */
 					if (addr >= rsp - 1) 
 					{
