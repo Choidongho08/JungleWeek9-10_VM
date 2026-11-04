@@ -39,12 +39,35 @@ file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
 static bool
 file_backed_swap_in (struct page *page, void *kva) {
 	struct file_page *file_page UNUSED = &page->file;
+	
+	lock_acquire(&file_lock);
+	off_t file_off = file_read_at(file_page->file, kva, (file_page->length < PGSIZE ? file_page->length : PGSIZE), file_page->off + (file_page->off_mag * PGSIZE));
+	lock_release(&file_lock);
+	if (!file_off) {
+		return false;
+	}
+
+	return true;
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool
 file_backed_swap_out (struct page *page) {
 	struct file_page *file_page UNUSED = &page->file;
+	// 페이지 내용을 파일에 다시 기록하여 스왑 아웃합니다. 먼저 dirty인지 확인할 수 있습니다.
+
+	if (pml4_is_dirty(page->frame->owner_pml4, page->va)) {
+		// 페이지 내용을 파일에 다시 기록
+		void* buff = page->frame->kva;
+		off_t off = page->file.off;
+		lock_acquire(&file_lock);
+		file_write_at(page->file.file, buff, (file_page->length < PGSIZE ? file_page->length : PGSIZE), PGSIZE * page->file.off_mag + off);
+		lock_release(&file_lock);
+	}
+	
+	pml4_set_dirty(page->frame->owner_pml4, page->va, false);
+	pml4_clear_page(page->frame->owner_pml4, page->va);	
+	return true;
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
