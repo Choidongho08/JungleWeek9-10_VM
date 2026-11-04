@@ -257,15 +257,18 @@ vm_try_handle_fault (struct intr_frame *f, void *addr, bool user, bool write, bo
 		}
 
 		page = spt_find_page (spt, addr);
+		if (page && write && !page->writable)
+			return false;
 
 		// 페이지가 없을 때에는 스택 growth를 해줘야돼. 그때 적합한 주소 값인지 검사해야됨.
 
 		// 1. addr이 스택 최대 크기 안에 있나?
 		// 2. addr이 현재 rsp 근처 또는 그 위에 있나?
 		// 둘 다 맞으면 스택을 늘린다.
-		if(!page && (USER_STACK - (1 << 20)) <= addr && addr >= rsp - 1) {
+		// 확장 후 페이지가 실제로 매핑되었는지 확인한다.
+		if(!page && (USER_STACK - (1 << 20)) <= addr && addr < USER_STACK && addr >= rsp - 1) {
 			vm_stack_growth(addr);
-			page = spt_find_page (spt, addr);
+			return pml4_get_page(thread_current()->pml4, addr) != NULL;
 		}
 		else if(page){
 			if (VM_TYPE(page->operations->type) == VM_ANON) {
