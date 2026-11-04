@@ -20,6 +20,7 @@ struct file_page
 	size_t length;
 	off_t off;
 	int off_mag;
+	size_t bit_idx;
 };
 
 void vm_file_init (void);

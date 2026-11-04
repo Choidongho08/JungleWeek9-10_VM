@@ -165,11 +165,14 @@ vm_evict_frame (void) {
 	}
 	else
 	{
-		// 우선 destroy하지만 나중에 file이 dirty상태라면 swap_out
-		destroy(victim->page);
+		//  file이 dirty상태라면 swap_out
+		if (pml4_is_dirty(victim->owner_pml4, victim->page->va)) {
+			swap_out(victim->page);
+		}
 	}
 
 	victim->page->frame = NULL;
+	victim->page = NULL;
 	return victim;
 }
 
