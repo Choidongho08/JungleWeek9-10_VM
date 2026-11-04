@@ -6,6 +6,7 @@ enum vm_type;
 
 struct anon_page {
     bool is_stacked;
+    size_t bit_idx;
 };
 
 void vm_anon_init (void);
