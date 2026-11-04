@@ -4,6 +4,7 @@
 #include "devices/disk.h"
 #include "kernel/bitmap.h"
 #include "threads/vaddr.h"
+#include "threads/mmu.h"
 
 /* DO NOT MODIFY BELOW LINE */
 static struct disk *swap_disk;
@@ -28,7 +29,7 @@ vm_anon_init (void) {
 	swap_disk = disk_get(1, 1);
 	
 	/* page 단위로 disk의 스왑영역에 위치하게 된다. */
-	bitmap_create(disk_size(swap_disk)/(PGSIZE/DISK_SECTOR_SIZE));
+	swap_table = bitmap_create(disk_size(swap_disk)/(PGSIZE/DISK_SECTOR_SIZE));
 }
 
 /* Initialize the file mapping */
@@ -72,7 +73,8 @@ anon_swap_in (struct page *page, void *kva) {
 		disk_read(swap_disk, anon_page->bit_idx * 8 + i, kva + DISK_SECTOR_SIZE * i);
 	}
 
-	bitmap_set_multiple(swap_table, anon_page->bit_idx, PGSIZE/DISK_SECTOR_SIZE, false);
+	bitmap_set(swap_table, anon_page->bit_idx, false);
+	return true;
 }
 
 /* Swap out the page by writing contents to the swap disk. */
@@ -87,15 +89,19 @@ anon_swap_out (struct page *page) {
 	struct anon_page *anon_page = &page->anon;
 	size_t idx;
 
-	anon_page->bit_idx = idx = bitmap_scan_and_flip(swap_table, 0, bitmap_size(swap_table), false);
+	anon_page->bit_idx = idx = bitmap_scan_and_flip(swap_table, 0, 1, false);
 
 	if (idx == BITMAP_ERROR) {
 		PANIC("BITMAP SCAN PANIC!");
+		return false;
 	}
 
-	for (int i = 0; i < PGSIZE/DISK_SECTOR_SIZE; i++) {
+	for (int i = 0; i < PGSIZE / DISK_SECTOR_SIZE; i++) {
 		disk_write(swap_disk, idx * 8 + i, page->frame->kva + DISK_SECTOR_SIZE * i);
 	}
+
+	pml4_clear_page(page->frame->owner_pml4, page->va);	
+	return true;
 }
 
 /* Destroy the anonymous page. PAGE will be freed by the caller. */

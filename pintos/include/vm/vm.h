@@ -67,6 +67,7 @@ struct frame {
 	void *kva;
 	struct page *page;
 	struct list_elem elem;
+	uint64_t* owner_pml4;
 };
 
 /* The function table for page operations.
