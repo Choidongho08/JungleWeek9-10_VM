@@ -88,6 +88,9 @@ spt_find_page (struct supplemental_page_table *spt, void *va)
 {
 	struct page *result = NULL;
 	result = malloc(sizeof(struct page));
+	if (!result) {
+		return NULL;
+	}
 	/* TODO: Fill this function. */
 
 	result->va = pg_round_down(va); // va의 값이 가상 주소의 시작점을 의미하겠다는 보장이 없다. 그러니 pg_round_down을 통해 시작점으로 맞춰준다.
@@ -95,6 +98,7 @@ spt_find_page (struct supplemental_page_table *spt, void *va)
 	struct hash_elem *e;
 
 	e = hash_find(&spt->spt_hash, &result->spt_hash_elem);
+	free(result);
 	if (!e) {
 		return NULL;
 	}
@@ -121,6 +125,8 @@ spt_insert_page (struct supplemental_page_table *spt, struct page *page)
 
 void spt_remove_page (struct supplemental_page_table *spt, struct page *page)
 {
+
+
 	hash_delete(&spt->spt_hash, &page->spt_hash_elem);
 	vm_dealloc_page(page);
 	return true;
@@ -136,7 +142,7 @@ static struct frame* vm_get_victim (void) {
 		return NULL;
 	}
 	
-	victim = list_front(&frame_table);
+	victim = list_entry(list_front(&frame_table), struct frame, elem);
 
 	return victim;
 }
@@ -163,6 +169,7 @@ vm_evict_frame (void) {
 		destroy(victim->page);
 	}
 
+	victim->page->frame = NULL;
 	return victim;
 }
 
@@ -182,7 +189,12 @@ static struct frame* vm_get_frame (void) {
 	frame->kva = palloc_get_page(PAL_USER);
 	if(!frame->kva)
 	{
+		free(frame);
 		frame = vm_evict_frame(); // kva가 할당되지 않았다는 건 유저프로그램에 꽉 찼다는 뜻이니, 하나를 내쫓고 프레임을 할당한다.
+	}
+
+	if (!frame) {
+		return NULL;
 	}
 
 	frame->page = NULL;
@@ -305,17 +317,23 @@ vm_claim_page (void *va UNUSED) {
 static bool vm_do_claim_page (struct page *page)
 {
 	struct frame *frame = vm_get_frame ();
+	if (!frame) {
+		return false;
+	}
 
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
 	
 	if (!pml4_set_page(thread_current()-> pml4, page->va, frame->kva, page->writable)) {
-		vm_dealloc_page(page); // page를 물리 메모리와 가상 공간에서 전부 지운다.
+		page->frame = NULL;
+		palloc_free_page(frame->kva);
+		free(frame);
 		return false;
 	}
+	frame->owner_pml4 = thread_current()->pml4;
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
-	// list_push_back(&frame_table, &frame->elem);
+	list_push_back(&frame_table, &frame->elem);
 
 	return swap_in (page, frame->kva); // 여기서 vm_alloc_page_with_initializer 때 넣었던 vm_type따라서 init실행 및 설정됨
 }
